@@ -151,7 +151,9 @@ input:focus, select:focus, textarea:focus { outline: 2px solid var(--accent); ou
 .compose { max-width: 560px; }
 .compose form { padding: 22px; display: flex; flex-direction: column; gap: 12px; }
 .compose h2 { font-family: var(--pixel); margin: 0; color: var(--accent); }
-.compose label { display: flex; flex-direction: column; gap: 4px; font-size: 13px; color: var(--muted); }
+.compose label, .edit label, .edit-pics { display: flex; flex-direction: column; gap: 4px; font-size: 13px; color: var(--muted); }
+.edit { display: flex; flex-direction: column; gap: 12px; }
+.edit-pics .previews { justify-content: flex-start; padding-top: 6px; }
 .row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
 .row.end { justify-content: flex-end; }
 

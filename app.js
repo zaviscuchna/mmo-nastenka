@@ -283,6 +283,13 @@ async function approveArt(item) {
   return dest;
 }
 
+async function deleteFile(path, message) {
+  try {
+    const { sha } = await gh(`${REPO}/contents/${encPath(path)}?ref=${CFG.branch}`);
+    await gh(`${REPO}/contents/${encPath(path)}`, { method: 'DELETE', body: { message, sha, branch: CFG.branch } });
+  } catch (e) { if (e.status !== 404) throw e; }
+}
+
 async function deleteItem(item) {
   if (!state.admin) {
     // Bez práv správce GitHub mazání issue nedovolí, takže se jen zavře a skryje.
@@ -293,14 +300,7 @@ async function deleteItem(item) {
     await gh(`${REPO}/issues/${item.number}`, { method: 'PATCH', body: { state: 'closed', state_reason: 'not_planned' } });
     return;
   }
-  for (const path of item.files) {
-    try {
-      const { sha } = await gh(`${REPO}/contents/${encPath(path)}?ref=${CFG.branch}`);
-      await gh(`${REPO}/contents/${encPath(path)}`, {
-        method: 'DELETE', body: { message: `Nástěnka: smazán návrh #${item.number}`, sha, branch: CFG.branch },
-      });
-    } catch (e) { if (e.status !== 404) throw e; }
-  }
+  for (const path of item.files) await deleteFile(path, `Nástěnka: smazán návrh #${item.number}`);
   const res = await gh('/graphql', {
     method: 'POST',
     body: { query: 'mutation($id: ID!) { deleteIssue(input: { issueId: $id }) { clientMutationId } }', variables: { id: item.nodeId } },
@@ -337,16 +337,32 @@ async function createItem({ type, title, desc, cat, files }) {
   return gh(`${REPO}/issues`, { method: 'POST', body: { title, body: buildBody(desc, meta), labels } });
 }
 
+const itemDir = (item) => item.files.length ? item.files[0].split('/').slice(0, -1).join('/')
+  : `board/navrhy/${item.number}-${slug(item.title)}`;
+// Popis tak, jak ho člověk napsal: bez metadat a odkazů na obrázky, ty skládá buildBody().
+const rawDesc = (item) => item.rawBody.replace(META_RE, '').replace(/!\[v\d+\]\([^)]*\)/g, '').trim();
+// Po odebrání obrázku nesedí počet s čísly v názvech souborů a nový by přepsal existující vN.
+const nextVersion = (files) => Math.max(0, ...files.map((p) => +(p.match(/\/v(\d+)\.[^/]*$/)?.[1] || 0))) + 1;
+
 async function addVersion(item, file, note) {
-  const dir = item.files.length ? item.files[0].split('/').slice(0, -1).join('/')
-    : `board/navrhy/${item.number}-${slug(item.title)}`;
-  const [path] = await uploadImages([file], dir, item.files.length + 1);
+  const [path] = await uploadImages([file], itemDir(item), nextVersion(item.files));
   const meta = { ...item.meta, files: [...item.files, path] };
-  const desc = item.rawBody.replace(META_RE, '').replace(/!\[v\d+\]\([^)]*\)/g, '').trim();
-  await gh(`${REPO}/issues/${item.number}`, { method: 'PATCH', body: { body: buildBody(desc, meta) } });
+  await gh(`${REPO}/issues/${item.number}`, { method: 'PATCH', body: { body: buildBody(rawDesc(item), meta) } });
   await gh(`${REPO}/issues/${item.number}/comments`, {
     method: 'POST', body: { body: `🖼️ Nová verze **v${meta.files.length}**${note ? `\n\n${note}` : ''}` },
   });
+}
+
+async function saveEdit(item, ed) {
+  let files = ed.files;
+  if (ed.added.length) files = [...files, ...await uploadImages(ed.added, itemDir(item), nextVersion(item.files))];
+  await gh(`${REPO}/issues/${item.number}`, {
+    method: 'PATCH', body: { title: ed.title.trim(), body: buildBody(ed.desc, { ...item.meta, files }) },
+  });
+  // Mazat až po uložení issue, aby při chybě nezůstal odkaz na neexistující obrázek.
+  for (const path of item.files.filter((p) => !ed.files.includes(p))) {
+    await deleteFile(path, `Nástěnka: odebrán obrázek z #${item.number}`);
+  }
 }
 
 // ---------- vykreslení seznamu ----------
@@ -433,6 +449,7 @@ async function openDetail(item) {
   viewer.version = item.files.length - 1;
   viewer.compare = '';
   viewer.pan = { x: 0, y: 0 };
+  viewer.edit = null;
   drawDetail(item);
   if (!dlg.open) dlg.showModal();
   if (!item.reactions) { await loadReactions(item).catch(() => {}); drawDetail(item); }
@@ -626,6 +643,12 @@ function drawDetail(item) {
   }
   if (item.state === 'schvaleno' || item.state === 'zamitnuto') actions.append(act('↺ Znovu otevřít', '', 'novy'));
   if (item.author === state.me.login || state.admin) {
+    if (!viewer.edit) {
+      actions.append(h('button', { class: 'btn', onclick: () => {
+        viewer.edit = { title: item.title, desc: rawDesc(item), files: [...item.files], added: [] };
+        redraw();
+      } }, '✏ Upravit'));
+    }
     const del = h('button', { class: 'btn no', title: 'Smazat příspěvek' }, '🗑 Smazat');
     del.onclick = busy(del, async () => {
       const kept = item.state === 'schvaleno' && item.type === 'grafika' ? '\nSchválená kopie v docs/art/ zůstane.' : '';
@@ -675,11 +698,12 @@ function drawDetail(item) {
       h('span', { class: `badge ${item.state}` }, STATE_NAMES[item.state]),
       h('span', { class: 'badge' }, item.type === 'grafika' ? 'grafika' : 'nápad'),
       item.cats.map((c) => h('span', { class: 'badge' }, c))),
-    h('h2', {}, item.title),
-    h('div', { class: 'muted small' },
-      `#${item.number} · ${nameOf(item.author)} · ${relTime(item.created)} · `,
-      h('a', { href: item.url, target: '_blank', rel: 'noopener', class: 'gh-link' }, 'otevřít na GitHubu ↗')),
-    item.desc && h('p', { class: 'desc' }, item.desc),
+    viewer.edit ? editForm(item, redraw) : [
+      h('h2', {}, item.title),
+      h('div', { class: 'muted small' },
+        `#${item.number} · ${nameOf(item.author)} · ${relTime(item.created)} · `,
+        h('a', { href: item.url, target: '_blank', rel: 'noopener', class: 'gh-link' }, 'otevřít na GitHubu ↗')),
+      item.desc && h('p', { class: 'desc' }, item.desc)],
     h('div', { class: 'vote-row' }, upBtn, downBtn),
     teamVotes,
     verdict,
@@ -694,6 +718,55 @@ function drawDetail(item) {
       viewerEl, side,
       h('button', { class: 'icon-btn close', title: 'Zavřít', onclick: () => dlg.close() }, '✕')));
   loadComments(item, commentsEl);
+}
+
+function editForm(item, redraw) {
+  const ed = viewer.edit;
+  const title = h('input', { value: ed.title, oninput: (e) => (ed.title = e.target.value) });
+  const desc = h('textarea', { rows: 5, placeholder: 'Popis (nepovinné)', oninput: (e) => (ed.desc = e.target.value) });
+  desc.value = ed.desc;
+
+  const pics = h('div', { class: 'previews' });
+  const remove = (list, i) => h('button', { type: 'button', title: 'Odebrat', onclick: () => { list.splice(i, 1); drawPics(); } }, '×');
+  const drawPics = () => pics.replaceChildren(
+    ...ed.files.map((p, i) => h('figure', {}, imgEl(p, { class: 'bg-check' }), remove(ed.files, i))),
+    ...ed.added.map((f, i) => h('figure', {}, h('img', { src: URL.createObjectURL(f), alt: f.name, class: 'bg-check' }), remove(ed.added, i))));
+  drawPics();
+
+  const input = h('input', { type: 'file', accept: 'image/*', multiple: true, hidden: true });
+  input.onchange = () => {
+    for (const f of input.files) {
+      if (!f.type.startsWith('image/')) continue;
+      if (f.size > 20 * 1024 * 1024) { toast(`${f.name} je větší než 20 MB`, true); continue; }
+      ed.added.push(f);
+    }
+    input.value = '';
+    drawPics();
+  };
+
+  const save = h('button', { class: 'btn primary' }, 'Uložit');
+  save.onclick = async () => {
+    if (!ed.title.trim()) { toast('Název nesmí být prázdný', true); return; }
+    save.disabled = true;
+    try {
+      await saveEdit(item, ed);
+      viewer.version = Math.max(0, ed.files.length + ed.added.length - 1);
+      viewer.edit = null;
+      await refreshItem(item);
+      toast('Uloženo');
+    } catch (e) {
+      toast(e.message, true);
+    } finally { save.disabled = false; }
+  };
+
+  return h('div', { class: 'edit' },
+    h('label', {}, 'Název', title),
+    h('label', {}, 'Popis', desc),
+    h('div', { class: 'edit-pics' }, 'Obrázky', pics,
+      h('div', {}, h('button', { class: 'btn', type: 'button', onclick: () => input.click() }, '+ Přidat obrázek'), input)),
+    h('div', { class: 'row end' },
+      h('button', { class: 'btn', onclick: () => { viewer.edit = null; redraw(); } }, 'Zrušit'),
+      save));
 }
 
 async function loadComments(item, el) {
