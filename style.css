@@ -169,8 +169,10 @@ input:focus, select:focus, textarea:focus { outline: 2px solid var(--accent); ou
 .detail-grid { display: grid; grid-template-columns: minmax(0, 1.4fr) minmax(300px, 1fr); max-height: min(88vh, 900px); }
 .detail-grid.no-image { grid-template-columns: 1fr; max-width: 680px; }
 .viewer { display: flex; flex-direction: column; border-right: 1px solid var(--line); min-height: 0; }
-.stage { flex: 1; min-height: 320px; overflow: auto; display: flex; align-items: center; justify-content: center; gap: 24px; padding: 24px; }
-.stage img { image-rendering: pixelated; flex: none; }
+.stage { flex: 1; min-height: 320px; overflow: hidden; display: flex; align-items: center; justify-content: center; padding: 24px; cursor: grab; touch-action: none; user-select: none; }
+.stage.grabbing { cursor: grabbing; }
+.stage .pan { display: flex; align-items: center; gap: 24px; flex: none; }
+.stage img { image-rendering: pixelated; flex: none; max-width: none; -webkit-user-drag: none; }
 .stage figure { margin: 0; display: flex; flex-direction: column; align-items: center; gap: 6px; }
 .stage figcaption { font-size: 12px; color: #000a; background: #fff9; padding: 1px 6px; border-radius: 3px; }
 .toolbar { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; padding: 10px 12px; border-top: 1px solid var(--line); font-size: 13px; }

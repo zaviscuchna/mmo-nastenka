@@ -426,12 +426,13 @@ function fillCatSelect(sel, type, withAll) {
 
 // ---------- detail ----------
 
-const viewer = { zoom: 'fit', bg: 'bg-check', version: null, compare: '' };
+const viewer = { zoom: 'fit', bg: 'bg-check', version: null, compare: '', pan: { x: 0, y: 0 } };
 
 async function openDetail(item) {
   const dlg = $('#detail');
   viewer.version = item.files.length - 1;
   viewer.compare = '';
+  viewer.pan = { x: 0, y: 0 };
   drawDetail(item);
   if (!dlg.open) dlg.showModal();
   if (!item.reactions) { await loadReactions(item).catch(() => {}); drawDetail(item); }
@@ -446,7 +447,7 @@ async function refreshItem(item) {
   render();
 }
 
-function stageEl(item) {
+function stageEl(item, onZoom, onReset) {
   const stage = h('div', { class: `stage ${viewer.bg}` });
   const path = item.files[viewer.version];
   const pics = [];
@@ -460,20 +461,80 @@ function stageEl(item) {
     for (const src of item.external) stage.append(h('img', { src, alt: '', style: 'max-width:100%' }));
     return stage;
   }
-  for (const p of pics) {
-    const img = imgEl(p.path);
+  const pan = h('div', { class: 'pan' });
+  const imgs = [];
+  if (viewer.zoom !== 'fit') stage.k = viewer.zoom;
+  pics.forEach((p, i) => {
+    const img = imgEl(p.path, { draggable: 'false' });
     img.addEventListener('load', () => {
       if (viewer.zoom === 'fit') {
         const box = stage.getBoundingClientRect();
         const maxW = (box.width - 48 - 24 * (pics.length - 1)) / pics.length;
         const k = Math.max(1, Math.floor(Math.min(maxW / img.naturalWidth, (box.height - 60) / img.naturalHeight)));
         img.style.width = img.naturalWidth * k + 'px';
+        if (i === 0) stage.k = k;
       } else {
         img.style.width = img.naturalWidth * viewer.zoom + 'px';
       }
     });
-    stage.append(h('figure', {}, img, p.cap && h('figcaption', {}, p.cap)));
-  }
+    imgs.push(img);
+    pan.append(h('figure', {}, img, p.cap && h('figcaption', {}, p.cap)));
+  });
+  stage.append(pan);
+  return panZoom(stage, pan, imgs, onZoom, onReset);
+}
+
+// Další celý násobek: malé kroky dole, pak zhruba o polovinu, ať se dá rychle dojet daleko.
+function zoomStep(k, dir) {
+  if (dir > 0) return k < 4 ? k + 1 : Math.round(k * 1.5);
+  return k <= 4 ? Math.max(1, k - 1) : Math.max(4, Math.round(k / 1.5));
+}
+
+// Kolečko přibližuje k místu pod myší (jen celé násobky, viz fitPixels), tažení posouvá.
+function panZoom(stage, pan, imgs, onZoom, onReset) {
+  stage.title = 'Kolečko: přiblížit / oddálit · táhni: posunout · dvojklik: přizpůsobit';
+  const move = () => (pan.style.transform = `translate(${viewer.pan.x}px, ${viewer.pan.y}px)`);
+  move();
+
+  // Touchpad posílá hodně malých kroků, tak se sčítají do jednoho cvaknutí kolečka.
+  let acc = 0;
+  stage.addEventListener('wheel', (e) => {
+    e.preventDefault();
+    acc += e.deltaY;
+    if (Math.abs(acc) < 40 || !stage.k) return;
+    const k = stage.k;
+    const k2 = acc < 0 ? zoomStep(k, 1) : zoomStep(k, -1);
+    acc = 0;
+    if (k2 === k || imgs.some((img) => img.naturalWidth * k2 > 12000)) return;
+    const box = stage.getBoundingClientRect();
+    const f = k2 / k - 1;
+    viewer.pan.x -= (e.clientX - box.left - box.width / 2 - viewer.pan.x) * f;
+    viewer.pan.y -= (e.clientY - box.top - box.height / 2 - viewer.pan.y) * f;
+    stage.k = viewer.zoom = k2;
+    for (const img of imgs) if (img.naturalWidth) img.style.width = img.naturalWidth * k2 + 'px';
+    move();
+    onZoom(k2);
+  }, { passive: false });
+
+  stage.addEventListener('pointerdown', (e) => {
+    if (e.button !== 0) return;
+    e.preventDefault();
+    stage.setPointerCapture(e.pointerId);
+    const sx = e.clientX - viewer.pan.x, sy = e.clientY - viewer.pan.y;
+    const drag = (ev) => { viewer.pan.x = ev.clientX - sx; viewer.pan.y = ev.clientY - sy; move(); };
+    const stop = () => {
+      stage.classList.remove('grabbing');
+      stage.removeEventListener('pointermove', drag);
+      stage.removeEventListener('pointerup', stop);
+      stage.removeEventListener('pointercancel', stop);
+    };
+    stage.classList.add('grabbing');
+    stage.addEventListener('pointermove', drag);
+    stage.addEventListener('pointerup', stop);
+    stage.addEventListener('pointercancel', stop);
+  });
+
+  stage.addEventListener('dblclick', onReset);
   return stage;
 }
 
@@ -490,10 +551,14 @@ function drawDetail(item) {
   let viewerEl = null;
   if (hasImg) {
     const others = state.items.filter((i) => i !== item && i.type === 'grafika' && i.files.length);
+    const zooms = [['fit', 'Přizpůsobit'], [1, '1×'], [2, '2×'], [4, '4×'], [8, '8×']];
+    const pickZoom = (v) => { viewer.zoom = v; viewer.pan = { x: 0, y: 0 }; redraw(); };
+    const zoomSeg = seg(zooms, viewer.zoom, pickZoom);
+    const markZoom = (k) => [...zoomSeg.children].forEach((b, i) => b.classList.toggle('on', zooms[i][0] === k));
     viewerEl = h('div', { class: 'viewer' },
-      stageEl(item),
+      stageEl(item, markZoom, () => pickZoom('fit')),
       item.files.length > 0 && h('div', { class: 'toolbar' },
-        seg([['fit', 'Přizpůsobit'], [1, '1×'], [2, '2×'], [4, '4×'], [8, '8×']], viewer.zoom, (v) => { viewer.zoom = v; redraw(); }),
+        zoomSeg,
         h('span', { class: 'row' }, ['bg-check', 'bg-dark', 'bg-light', 'bg-grass'].map((b) =>
           h('button', { class: `swatch ${b} ${viewer.bg === b ? 'on' : ''}`, title: 'Pozadí', onclick: () => { viewer.bg = b; redraw(); } }))),
         item.files.length > 1 && seg(item.files.map((_, i) => [i, `v${i + 1}`]), viewer.version, (v) => { viewer.version = v; redraw(); }),
