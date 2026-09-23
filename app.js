@@ -470,7 +470,8 @@ function stageEl(item, onZoom, onReset) {
       if (viewer.zoom === 'fit') {
         const box = stage.getBoundingClientRect();
         const maxW = (box.width - 48 - 24 * (pics.length - 1)) / pics.length;
-        const k = Math.max(1, Math.floor(Math.min(maxW / img.naturalWidth, (box.height - 60) / img.naturalHeight)));
+        const fit = Math.min(maxW / img.naturalWidth, (box.height - 60) / img.naturalHeight);
+        const k = fit >= 1 ? Math.floor(fit) : fit;
         img.style.width = img.naturalWidth * k + 'px';
         if (i === 0) stage.k = k;
       } else {
@@ -484,13 +485,14 @@ function stageEl(item, onZoom, onReset) {
   return panZoom(stage, pan, imgs, onZoom, onReset);
 }
 
-// Další celý násobek: malé kroky dole, pak zhruba o polovinu, ať se dá rychle dojet daleko.
+// Nad 1× jen celé násobky (malé kroky dole, pak zhruba o polovinu), pod 1× se velké obrázky
+// zmenšují plynule, zmenšení pixel art nerozbije.
 function zoomStep(k, dir) {
-  if (dir > 0) return k < 4 ? k + 1 : Math.round(k * 1.5);
-  return k <= 4 ? Math.max(1, k - 1) : Math.max(4, Math.round(k / 1.5));
+  if (dir > 0) return k < 1 ? Math.min(1, k * 1.5) : k < 4 ? k + 1 : Math.round(k * 1.5);
+  return k > 4 ? Math.max(4, Math.round(k / 1.5)) : k > 1 ? k - 1 : k / 1.5;
 }
 
-// Kolečko přibližuje k místu pod myší (jen celé násobky, viz fitPixels), tažení posouvá.
+// Kolečko přibližuje k místu pod myší (nad 1× jen celé násobky, viz fitPixels), tažení posouvá.
 function panZoom(stage, pan, imgs, onZoom, onReset) {
   stage.title = 'Kolečko: přiblížit / oddálit · táhni: posunout · dvojklik: přizpůsobit';
   const move = () => (pan.style.transform = `translate(-50%, -50%) translate(${viewer.pan.x}px, ${viewer.pan.y}px)`);
@@ -505,7 +507,7 @@ function panZoom(stage, pan, imgs, onZoom, onReset) {
     const k = stage.k;
     const k2 = acc < 0 ? zoomStep(k, 1) : zoomStep(k, -1);
     acc = 0;
-    if (k2 === k || imgs.some((img) => img.naturalWidth * k2 > 12000)) return;
+    if (imgs.some((img) => img.naturalWidth * k2 > 12000 || Math.max(img.naturalWidth, img.naturalHeight) * k2 < 32)) return;
     const box = stage.getBoundingClientRect();
     const f = k2 / k - 1;
     viewer.pan.x -= (e.clientX - box.left - box.width / 2 - viewer.pan.x) * f;
