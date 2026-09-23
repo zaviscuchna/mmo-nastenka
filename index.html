@@ -42,6 +42,7 @@
       <button data-tab="grafika">Grafika</button>
     </nav>
     <div class="top-actions">
+      <button class="icon-btn" id="new-vylepseni" title="Navrhnout vylepšení nástěnky">💡</button>
       <button class="btn" id="new-napad">+ Nápad</button>
       <button class="btn primary" id="new-grafika">+ Grafika</button>
       <button class="icon-btn" id="refresh" title="Načíst znovu">⟳</button>
@@ -76,12 +77,13 @@
     <label>Název
       <input name="title" required maxlength="120" placeholder="Např. Rybaření u jezera">
     </label>
-    <label>Oblast
+    <label id="compose-cat-wrap">Oblast
       <select name="cat" id="compose-cat"></select>
     </label>
     <label>Popis
       <textarea name="body" rows="5" placeholder="Klidně jedna věta."></textarea>
     </label>
+    <p class="muted small" id="compose-hint" hidden></p>
     <div class="drop" id="drop">
       <input type="file" id="files" accept="image/*" multiple hidden>
       <p><b>Přetáhni obrázky sem</b>, vlož přes Ctrl+V, nebo <a href="#" id="pick">vyber soubor</a>.</p>

@@ -1,0 +1,14 @@
+name: Chyba
+description: Něco na nástěnce nefunguje
+labels: ["chyba"]
+body:
+  - type: textarea
+    id: co
+    attributes:
+      label: Co se stalo a co jsi čekal
+    validations:
+      required: true
+  - type: input
+    id: kde
+    attributes:
+      label: Prohlížeč / telefon

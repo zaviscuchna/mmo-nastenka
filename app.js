@@ -24,6 +24,8 @@ const CATS = {
 const ART_DIR = { postava: 'postavy', 'prostředí': 'prostredi', 'předmět': 'predmety', ui: 'ui', moodboard: 'moodboard' };
 const META_RE = /<!--\s*nastenka\s+(\{[\s\S]*?\})\s*-->/;
 const TOKEN_KEY = 'mmo-nastenka-token';
+// Nápady na vylepšení samotné nástěnky jdou do jejího repa (veřejného!), ne do hry.
+const BOARD_REPO = '/repos/zaviscuchna/mmo-nastenka';
 
 const $ = (s) => document.querySelector(s);
 const state = {
@@ -651,9 +653,14 @@ function openCompose(type) {
   compose.files = [];
   const f = $('#compose-form');
   f.reset();
-  $('#compose-title').textContent = type === 'grafika' ? 'Nový návrh grafiky' : 'Nový nápad';
-  f.elements.title.placeholder = type === 'grafika' ? 'Např. Kovář — první verze' : 'Např. Rybaření u jezera';
-  fillCatSelect($('#compose-cat'), type, false);
+  const board = type === 'vylepseni';
+  $('#compose-title').textContent = { grafika: 'Nový návrh grafiky', napad: 'Nový nápad', vylepseni: 'Vylepšit nástěnku' }[type];
+  f.elements.title.placeholder = { grafika: 'Např. Kovář — první verze', napad: 'Např. Rybaření u jezera', vylepseni: 'Např. Řazení podle počtu hlasů' }[type];
+  $('#compose-cat-wrap').hidden = board;
+  $('#drop').hidden = board;
+  $('#compose-hint').hidden = !board;
+  $('#compose-hint').textContent = 'Co ti na nástěnce chybí nebo vadí? Založí se úkol v repu mmo-nastenka a kdokoli z nás ho může dát svému Claudovi. Repo nástěnky je veřejné, takže sem nepiš nic tajného o hře.';
+  if (!board) fillCatSelect($('#compose-cat'), type, false);
   $('#compose-err').textContent = '';
   drawPreviews();
   $('#compose').showModal();
@@ -697,6 +704,21 @@ function setupCompose() {
     }
     const btn = $('#compose-send');
     btn.disabled = true;
+    if (compose.type === 'vylepseni') {
+      try {
+        const issue = await gh(`${BOARD_REPO}/issues`, {
+          method: 'POST',
+          body: { title: f.elements.title.value.trim(), body: f.elements.body.value.trim(), labels: ['vylepšení'] },
+        });
+        $('#compose').close();
+        toast(`Úkol #${issue.number} založen v mmo-nastenka`);
+      } catch (err) {
+        $('#compose-err').textContent = err.message;
+      } finally {
+        btn.disabled = false;
+      }
+      return;
+    }
     btn.textContent = compose.files.length ? 'Nahrávám obrázky…' : 'Přidávám…';
     try {
       const issue = await createItem({
@@ -746,6 +768,7 @@ function setupUi() {
   $('#cat-filter').onchange = (e) => { state.cat = e.target.value; render(); };
   fillCatSelect($('#cat-filter'), 'vse', true);
   $('#new-napad').onclick = () => openCompose('napad');
+  $('#new-vylepseni').onclick = () => openCompose('vylepseni');
   $('#new-grafika').onclick = () => openCompose('grafika');
   $('#refresh').onclick = () => { imgCache.clear(); loadItems().catch((e) => toast(e.message, true)); };
   $('#me').onclick = () => {
