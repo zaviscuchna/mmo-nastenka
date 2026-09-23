@@ -493,7 +493,7 @@ function zoomStep(k, dir) {
 // Kolečko přibližuje k místu pod myší (jen celé násobky, viz fitPixels), tažení posouvá.
 function panZoom(stage, pan, imgs, onZoom, onReset) {
   stage.title = 'Kolečko: přiblížit / oddálit · táhni: posunout · dvojklik: přizpůsobit';
-  const move = () => (pan.style.transform = `translate(${viewer.pan.x}px, ${viewer.pan.y}px)`);
+  const move = () => (pan.style.transform = `translate(-50%, -50%) translate(${viewer.pan.x}px, ${viewer.pan.y}px)`);
   move();
 
   // Touchpad posílá hodně malých kroků, tak se sčítají do jednoho cvaknutí kolečka.
