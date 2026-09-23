@@ -1,0 +1,102 @@
+<!doctype html>
+<html lang="cs">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>MMO nástěnka</title>
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 8 8' shape-rendering='crispEdges'><rect width='8' height='8' fill='%23f2b84b'/><rect x='2' y='2' width='4' height='4' fill='%2314121a'/></svg>">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Pixelify+Sans:wght@500;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<!-- Přihlášení -->
+<section id="login" class="login" hidden>
+  <div class="login-box">
+    <h1>MMO nástěnka</h1>
+    <p>Nápady a návrhy grafiky na jednom místě. Data leží v soukromém repu
+      <code>zaviscuchna/mmo-rpg</code>, takže se přihlašuješ svým GitHubem.</p>
+    <ol>
+      <li><a id="token-link" target="_blank" rel="noopener">Vytvoř si klíč na GitHubu</a>
+        (zaškrtnuté <code>repo</code> nech, platnost klidně 90 dní).</li>
+      <li>Klíč zkopíruj a vlož sem:</li>
+    </ol>
+    <form id="login-form">
+      <input id="token" type="password" placeholder="ghp_…" autocomplete="off" required>
+      <button class="btn primary" type="submit">Přihlásit</button>
+    </form>
+    <p id="login-err" class="err"></p>
+    <p class="muted small">Klíč zůstává jen v tomhle prohlížeči a posílá se jen na api.github.com.</p>
+  </div>
+</section>
+
+<!-- Aplikace -->
+<div id="app" hidden>
+  <header class="top">
+    <div class="brand">MMO nástěnka</div>
+    <nav class="tabs" id="tabs">
+      <button data-tab="vse" class="on">Vše</button>
+      <button data-tab="napad">Nápady</button>
+      <button data-tab="grafika">Grafika</button>
+    </nav>
+    <div class="top-actions">
+      <button class="btn" id="new-napad">+ Nápad</button>
+      <button class="btn primary" id="new-grafika">+ Grafika</button>
+      <button class="icon-btn" id="refresh" title="Načíst znovu">⟳</button>
+      <img id="me" class="avatar" alt="" title="Odhlásit">
+    </div>
+  </header>
+
+  <div class="filters">
+    <div class="chips" id="state-chips">
+      <button data-state="novy" class="on">Nové</button>
+      <button data-state="diskuse" class="on">Diskuse</button>
+      <button data-state="schvaleno">Schválené</button>
+      <button data-state="zamitnuto">Zamítnuté</button>
+    </div>
+    <select id="cat-filter" aria-label="Kategorie">
+      <option value="">Všechny oblasti</option>
+    </select>
+    <span id="count" class="muted small"></span>
+  </div>
+
+  <main id="grid" class="grid"></main>
+  <p id="empty" class="empty" hidden>Nic tu není. Přidej první nápad nebo návrh.</p>
+</div>
+
+<!-- Detail -->
+<dialog id="detail" class="dlg detail"></dialog>
+
+<!-- Nový příspěvek -->
+<dialog id="compose" class="dlg compose">
+  <form id="compose-form" method="dialog">
+    <h2 id="compose-title">Nový nápad</h2>
+    <label>Název
+      <input name="title" required maxlength="120" placeholder="Např. Rybaření u jezera">
+    </label>
+    <label>Oblast
+      <select name="cat" id="compose-cat"></select>
+    </label>
+    <label>Popis
+      <textarea name="body" rows="5" placeholder="Klidně jedna věta."></textarea>
+    </label>
+    <div class="drop" id="drop">
+      <input type="file" id="files" accept="image/*" multiple hidden>
+      <p><b>Přetáhni obrázky sem</b>, vlož přes Ctrl+V, nebo <a href="#" id="pick">vyber soubor</a>.</p>
+      <div class="previews" id="previews"></div>
+    </div>
+    <p class="err" id="compose-err"></p>
+    <div class="row end">
+      <button class="btn" value="cancel" formnovalidate>Zrušit</button>
+      <button class="btn primary" id="compose-send" value="send">Přidat</button>
+    </div>
+  </form>
+</dialog>
+
+<div id="toast" class="toast" hidden></div>
+
+<script type="module" src="app.js"></script>
+</body>
+</html>
