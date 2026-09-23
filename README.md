@@ -12,7 +12,6 @@ přes GitHub API klíčem přihlášeného člověka. Bez přístupu k `mmo-rpg`
 - nastavení týmu a repa je na začátku `app.js` (`CFG`)
 - lokálně: `python3 -m http.server` a otevřít `http://localhost:8000`
 
-## Vylepšování
-Nástěnku si vylepšujeme sami. Nápad → tlačítko 💡 na nástěnce nebo issue tady.
-Pak ho kdokoli dá svému Claude Code (`vezmi issue #N z mmo-nastenka`). Pravidla jsou v [`CLAUDE.md`](CLAUDE.md).
-Každý push do `main` je do minuty živě.
+## Úpravy
+Nástěnku si upravujeme sami: řekni svému Claude Code, co chceš změnit. Pravidla má v [`CLAUDE.md`](CLAUDE.md).
+Každý push do `main` projde kontrolou a do minuty je živě. Když kontrola selže, zůstane předchozí verze.
