@@ -14,6 +14,7 @@ const CFG = {
 };
 
 const TYPES = { napad: 'nápad', grafika: 'grafika' };
+const HIDDEN_LABEL = 'smazáno';
 const STATE_LABELS = { diskuse: 'diskuse', schvaleno: 'schváleno', zamitnuto: 'zamítnuto' };
 const STATE_NAMES = { novy: 'Nové', diskuse: 'Diskuse', schvaleno: 'Schváleno', zamitnuto: 'Zamítnuto' };
 const CATS = {
@@ -28,6 +29,7 @@ const $ = (s) => document.querySelector(s);
 const state = {
   token: null,
   me: null,
+  admin: false, // jen správce repa smí issue opravdu smazat, ostatní ho jen skryjí
   items: [],
   tab: 'vse',
   states: new Set(['novy', 'diskuse']),
@@ -183,6 +185,7 @@ function parseIssue(issue) {
 
   return {
     number: issue.number,
+    nodeId: issue.node_id,
     title: issue.title,
     url: issue.html_url,
     author: issue.user.login,
@@ -211,7 +214,10 @@ async function loadItems() {
     ghAll(`${REPO}/issues?state=all&labels=${encodeURIComponent(TYPES.grafika)}`),
   ]);
   const seen = new Map();
-  for (const i of [...a, ...b]) if (!i.pull_request) seen.set(i.number, i);
+  for (const i of [...a, ...b]) {
+    if (i.pull_request || i.labels.some((l) => l.name === HIDDEN_LABEL)) continue;
+    seen.set(i.number, i);
+  }
   state.items = [...seen.values()].map(parseIssue).sort((x, y) => y.number - x.number);
   render();
   loadAllReactions();
@@ -275,6 +281,31 @@ async function approveArt(item) {
   const b64 = await blobToBase64(await repoImage(src));
   await putFile(dest, b64, `Schváleno z nástěnky: ${item.title} (#${item.number})`);
   return dest;
+}
+
+async function deleteItem(item) {
+  if (!state.admin) {
+    // Bez práv správce GitHub mazání issue nedovolí, takže se jen zavře a skryje.
+    await gh(`${REPO}/issues/${item.number}/comments`, {
+      method: 'POST', body: { body: `🗑 Smazáno z nástěnky (${nameOf(state.me.login)}).` },
+    });
+    await gh(`${REPO}/issues/${item.number}/labels`, { method: 'POST', body: { labels: [HIDDEN_LABEL] } });
+    await gh(`${REPO}/issues/${item.number}`, { method: 'PATCH', body: { state: 'closed', state_reason: 'not_planned' } });
+    return;
+  }
+  for (const path of item.files) {
+    try {
+      const { sha } = await gh(`${REPO}/contents/${encPath(path)}?ref=${CFG.branch}`);
+      await gh(`${REPO}/contents/${encPath(path)}`, {
+        method: 'DELETE', body: { message: `Nástěnka: smazán návrh #${item.number}`, sha, branch: CFG.branch },
+      });
+    } catch (e) { if (e.status !== 404) throw e; }
+  }
+  const res = await gh('/graphql', {
+    method: 'POST',
+    body: { query: 'mutation($id: ID!) { deleteIssue(input: { issueId: $id }) { clientMutationId } }', variables: { id: item.nodeId } },
+  });
+  if (res.errors?.length) throw new Error(res.errors[0].message);
 }
 
 async function uploadImages(files, dir, startAt = 1) {
@@ -527,6 +558,20 @@ function drawDetail(item) {
     }));
   }
   if (item.state === 'schvaleno' || item.state === 'zamitnuto') actions.append(act('↺ Znovu otevřít', '', 'novy'));
+  if (item.author === state.me.login || state.admin) {
+    const del = h('button', { class: 'btn no', title: 'Smazat příspěvek' }, '🗑 Smazat');
+    del.onclick = busy(del, async () => {
+      const kept = item.state === 'schvaleno' && item.type === 'grafika' ? '\nSchválená kopie v docs/art/ zůstane.' : '';
+      const how = state.admin ? 'Smaže se úplně i s obrázky a nejde to vrátit.' : 'Zmizí z nástěnky, na GitHubu zůstane zavřený.';
+      if (!confirm(`Smazat „${item.title}"?\n${how}${kept}`)) return;
+      await deleteItem(item);
+      state.items = state.items.filter((i) => i !== item);
+      $('#detail').close();
+      render();
+      toast('Smazáno');
+    });
+    actions.append(del);
+  }
 
   let versionEl = null;
   if (item.type === 'grafika') {
@@ -714,7 +759,7 @@ async function login(token) {
   state.token = token;
   const me = await gh('/user');
   try {
-    await gh(REPO);
+    state.admin = !!(await gh(REPO)).permissions?.admin;
   } catch (e) {
     if (e.status === 404) throw new Error(`Účet ${me.login} nemá přístup k ${CFG.owner}/${CFG.repo}. Přijal jsi pozvánku a má klíč zaškrtnuté „repo"?`);
     throw e;
