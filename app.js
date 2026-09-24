@@ -1,5 +1,7 @@
 // MMO nástěnka — vizuální přední strana pro issues v zaviscuchna/mmo-rpg.
 // Nápad / návrh = issue, hlas = reakce 👍/👎, obrázky = soubory v repu.
+// Rozhodnutí = issue s možnostmi, hlas = komentář se značkou <!-- hlas {"o":N} -->.
+// Stavba = technický úkol; kdo na něm dělá = assignee, hotovo = zavřené issue.
 // Všechno, co se tu udělá, je vidět i přímo na GitHubu.
 
 const CFG = {
@@ -13,7 +15,10 @@ const CFG = {
   ],
 };
 
-const TYPES = { napad: 'nápad', grafika: 'grafika' };
+const TYPES = { napad: 'nápad', grafika: 'grafika', rozhodnuti: 'rozhodnutí', stavba: 'stavba' };
+const TYPE_NAMES = { napad: 'nápad', grafika: 'grafika', rozhodnuti: 'rozhodnutí', stavba: 'úkol' };
+const BALLOT_RE = /<!--\s*hlas\s+(\{[^}]*\})\s*-->/;
+const STAVBA_TEMPLATE = 'Co: \n\nHotovo, když:\n- [ ] \n\nZávisí na: ';
 const HIDDEN_LABEL = 'smazáno';
 const STATE_LABELS = { diskuse: 'diskuse', schvaleno: 'schváleno', zamitnuto: 'zamítnuto' };
 const STATE_NAMES = { novy: 'Nové', diskuse: 'Diskuse', schvaleno: 'Schváleno', zamitnuto: 'Zamítnuto' };
@@ -83,6 +88,11 @@ function fileToBase64(file) {
   });
 }
 function blobToBase64(blob) { return fileToBase64(blob); }
+function textToBase64(text) {
+  let bin = '';
+  for (const b of new TextEncoder().encode(text)) bin += String.fromCharCode(b);
+  return btoa(bin);
+}
 
 function relTime(iso) {
   const d = (Date.now() - new Date(iso)) / 1000;
@@ -158,7 +168,9 @@ async function putFile(path, base64, message) {
 
 function parseIssue(issue) {
   const labels = issue.labels.map((l) => (typeof l === 'string' ? l : l.name));
-  const type = labels.includes(TYPES.grafika) ? 'grafika' : 'napad';
+  const type = labels.includes(TYPES.grafika) ? 'grafika'
+    : labels.includes(TYPES.rozhodnuti) ? 'rozhodnuti'
+      : labels.includes(TYPES.stavba) ? 'stavba' : 'napad';
   let st = 'novy';
   if (labels.includes(STATE_LABELS.zamitnuto)) st = 'zamitnuto';
   else if (labels.includes(STATE_LABELS.schvaleno)) st = 'schvaleno';
@@ -205,22 +217,35 @@ function parseIssue(issue) {
     up: issue.reactions?.['+1'] || 0,
     down: issue.reactions?.['-1'] || 0,
     reactions: null, // doplní se
+    options: Array.isArray(meta.options) ? meta.options : [],
+    winner: Number.isInteger(meta.winner) ? meta.winner : null,
+    ballots: null, // doplní se
+    talk: null, // počet komentářů bez hlasovacích
+    assignees: (issue.assignees || []).map((u) => u.login),
+    checks: {
+      done: (body.match(/^\s*- \[x\]/gim) || []).length,
+      total: (body.match(/^\s*- \[[ x]\]/gim) || []).length,
+    },
+    deps: parseDeps(body),
   };
 }
 
+function parseDeps(body) {
+  const line = body.match(/^\s*(?:\*\*)?Závisí na(?:\*\*)?:?(.*)$/im);
+  return line ? [...line[1].matchAll(/#(\d+)/g)].map((x) => +x[1]) : [];
+}
+
 async function loadItems() {
-  const [a, b] = await Promise.all([
-    ghAll(`${REPO}/issues?state=all&labels=${encodeURIComponent(TYPES.napad)}`),
-    ghAll(`${REPO}/issues?state=all&labels=${encodeURIComponent(TYPES.grafika)}`),
-  ]);
+  const lists = await Promise.all(Object.values(TYPES).map((l) =>
+    ghAll(`${REPO}/issues?state=all&labels=${encodeURIComponent(l)}`)));
   const seen = new Map();
-  for (const i of [...a, ...b]) {
+  for (const i of lists.flat()) {
     if (i.pull_request || i.labels.some((l) => l.name === HIDDEN_LABEL)) continue;
     seen.set(i.number, i);
   }
   state.items = [...seen.values()].map(parseIssue).sort((x, y) => y.number - x.number);
   render();
-  loadAllReactions();
+  loadAllExtras();
 }
 
 async function loadReactions(item) {
@@ -230,13 +255,39 @@ async function loadReactions(item) {
   item.down = item.reactions.filter((r) => r.content === '-1').length;
 }
 
-async function loadAllReactions() {
-  for (const i of state.items) if (i.up + i.down === 0) i.reactions = [];
-  const queue = state.items.filter((i) => !i.reactions);
+async function loadBallots(item) {
+  const list = await ghAll(`${REPO}/issues/${item.number}/comments`);
+  item.ballots = new Map();
+  let talk = 0;
+  for (const c of list) {
+    const m = c.body.match(BALLOT_RE);
+    if (!m) { talk++; continue; }
+    try {
+      const { o } = JSON.parse(m[1]);
+      if (Number.isInteger(o) && o >= 0 && o < item.options.length) item.ballots.set(c.user.login, { o, id: c.id });
+    } catch {}
+  }
+  item.comments = list.length;
+  item.talk = talk;
+}
+
+// Hlasy (reakce u nápadů, hlasovací komentáře u rozhodnutí) se načítají zvlášť po kartách.
+const hasExtras = (i) => (i.type === 'rozhodnuti' ? !!i.ballots : i.type === 'stavba' ? true : !!i.reactions);
+async function loadExtras(i) {
+  if (i.type === 'rozhodnuti') await loadBallots(i);
+  else if (i.type !== 'stavba') await loadReactions(i);
+}
+
+async function loadAllExtras() {
+  for (const i of state.items) {
+    if ((i.type === 'napad' || i.type === 'grafika') && i.up + i.down === 0) i.reactions = [];
+    if (i.type === 'rozhodnuti' && i.comments === 0) { i.ballots = new Map(); i.talk = 0; }
+  }
+  const queue = state.items.filter((i) => !hasExtras(i));
   const worker = async () => {
     while (queue.length) {
       const it = queue.shift();
-      try { await loadReactions(it); updateCard(it); } catch {}
+      try { await loadExtras(it); updateCard(it); } catch {}
     }
   };
   await Promise.all(Array.from({ length: 6 }, worker));
@@ -253,6 +304,77 @@ async function vote(item, content) {
     await gh(`${REPO}/issues/${item.number}/reactions`, { method: 'POST', body: { content } });
   }
   await loadReactions(item);
+}
+
+function tally(item) {
+  const t = item.options.map((opt, i) => ({ i, opt, n: 0, voters: [] }));
+  for (const [login, b] of item.ballots || []) { t[b.o].n++; t[b.o].voters.push(login); }
+  return t;
+}
+
+async function castBallot(item, o) {
+  const mine = item.ballots.get(state.me.login);
+  const body = `🗳️ Hlasuji pro: **${item.options[o]}**\n\n<!-- hlas ${JSON.stringify({ o })} -->`;
+  if (mine && mine.o === o) await gh(`${REPO}/issues/comments/${mine.id}`, { method: 'DELETE' });
+  else if (mine) await gh(`${REPO}/issues/comments/${mine.id}`, { method: 'PATCH', body: { body } });
+  else await gh(`${REPO}/issues/${item.number}/comments`, { method: 'POST', body: { body } });
+  await loadBallots(item);
+}
+
+async function writeDecisionRecord(item, t, win) {
+  let files = [];
+  try { files = await gh(`${REPO}/contents/docs/rozhodnuti?ref=${CFG.branch}`); } catch (e) { if (e.status !== 404) throw e; }
+  const nums = files.map((f) => parseInt(f.name, 10)).filter(Number.isFinite);
+  const n = String((nums.length ? Math.max(...nums) : 0) + 1).padStart(3, '0');
+  const path = `docs/rozhodnuti/${n}-${slug(item.title)}.md`;
+  const line = (x) => `- ${x.opt}: ${x.n}× (${x.voters.map(nameOf).join(', ') || 'nikdo'})`;
+  const md = [
+    `# ${n}: ${item.title}`, '',
+    `- Datum: ${new Date().toISOString().slice(0, 10)}`,
+    `- Rozhodli: ${[...item.ballots.keys()].map(nameOf).join(', ')}`,
+    `- Issue: #${item.number}`,
+    '- Stav: platí', '',
+    '## Co jsme rozhodli', `**${win.opt}**`, '',
+    '## Proč', item.desc || 'Rozhodnuto hlasováním na nástěnce.', '',
+    '## Hlasování', ...t.map(line), '',
+    '## Co jsme zvažovali a proč ne', ...(t.filter((x) => x !== win).map((x) => `- ${x.opt}`)), '',
+  ].join('\n');
+  await putFile(path, textToBase64(md), `Rozhodnutí ${n}: ${item.title} (#${item.number})`);
+  return path;
+}
+
+async function closeDecision(item) {
+  const t = tally(item);
+  const max = Math.max(0, ...t.map((x) => x.n));
+  const lead = t.filter((x) => x.n === max);
+  if (max === 0) throw new Error('Zatím nikdo nehlasoval.');
+  if (lead.length > 1) throw new Error(`Remíza: ${lead.map((x) => x.opt).join(' / ')}. Dohodněte se, nebo někdo změní hlas.`);
+  const [win] = lead;
+  if (!confirm(`Uzavřít rozhodnutí?\nVyhrává: ${win.opt} (${win.n} z ${CFG.team.length})\nZáznam se uloží do docs/rozhodnuti/.`)) throw new Error('Zrušeno');
+  const record = await writeDecisionRecord(item, t, win);
+  await gh(`${REPO}/issues/${item.number}`, {
+    method: 'PATCH', body: { body: buildBody(rawDesc(item), { ...item.meta, winner: win.i, record }) },
+  });
+  await setState(item, 'schvaleno', `✅ **Rozhodnuto: ${win.opt}** (${nameOf(state.me.login)} uzavřel/a hlasování, ${win.n} z ${CFG.team.length}).\n\nZáznam: \`${record}\``);
+}
+
+const column = (i) => (!i.open ? 'hotovo' : i.assignees.length ? 'dela' : 'rada');
+const blockedBy = (item) => item.deps.filter((n) => state.items.find((i) => i.number === n)?.open);
+
+async function claim(item, on) {
+  const me = state.me.login;
+  await gh(`${REPO}/issues/${item.number}`, {
+    method: 'PATCH', body: { assignees: on ? [me] : item.assignees.filter((a) => a !== me) },
+  });
+}
+
+async function setDone(item, done) {
+  await gh(`${REPO}/issues/${item.number}`, {
+    method: 'PATCH', body: done ? { state: 'closed', state_reason: 'completed' } : { state: 'open' },
+  });
+  await gh(`${REPO}/issues/${item.number}/comments`, {
+    method: 'POST', body: { body: done ? `✓ Hotovo (${nameOf(state.me.login)}).` : `↺ Vráceno do práce (${nameOf(state.me.login)}).` },
+  });
 }
 
 async function setState(item, st, note) {
@@ -326,14 +448,15 @@ function buildBody(desc, meta) {
   return [desc.trim(), imgs, `<!-- nastenka ${JSON.stringify(meta)} -->`].filter(Boolean).join('\n\n');
 }
 
-async function createItem({ type, title, desc, cat, files }) {
+async function createItem({ type, title, desc, cat, files, options }) {
   const meta = {};
-  if (files.length) {
+  if (type === 'rozhodnuti') meta.options = options;
+  if (files.length && (type === 'napad' || type === 'grafika')) {
     const d = new Date().toISOString().slice(0, 10).replace(/-/g, '');
     const dir = `board/navrhy/${d}-${slug(title)}-${Math.random().toString(36).slice(2, 6)}`;
     meta.files = await uploadImages(files, dir);
   }
-  const labels = [TYPES[type], cat].filter(Boolean);
+  const labels = [TYPES[type], (type === 'napad' || type === 'grafika') && cat].filter(Boolean);
   return gh(`${REPO}/issues`, { method: 'POST', body: { title, body: buildBody(desc, meta), labels } });
 }
 
@@ -369,7 +492,7 @@ async function saveEdit(item, ed) {
 
 function visible() {
   return state.items.filter((i) =>
-    (state.tab === 'vse' || i.type === state.tab) &&
+    (state.tab === 'vse' ? i.type !== 'stavba' : i.type === state.tab) &&
     state.states.has(i.state) &&
     (!state.cat || i.cats.includes(state.cat)));
 }
@@ -390,17 +513,34 @@ function fitPixels(img, fill) {
   return img;
 }
 
+const avatar = (login, attrs = {}) => h('img', { src: `https://github.com/${login}.png?size=44`, alt: '', title: nameOf(login), ...attrs });
+const stateName = (i) => (i.type === 'rozhodnuti' && i.state === 'schvaleno' ? 'Rozhodnuto' : STATE_NAMES[i.state]);
+
 function votersEl(item) {
   const wrap = h('span', { class: 'voters' });
+  if (item.type === 'rozhodnuti') {
+    for (const login of item.ballots?.keys() || []) wrap.append(avatar(login));
+    return wrap;
+  }
   for (const r of item.reactions || []) {
     wrap.append(h('img', { src: r.user.avatar_url + '&s=40', class: r.content === '+1' ? 'up' : 'down', title: `${nameOf(r.user.login)} ${r.content === '+1' ? '👍' : '👎'}` }));
   }
   return wrap;
 }
 
+function decisionMini(item) {
+  const done = item.state === 'schvaleno';
+  return h('div', { class: 'opts-mini' }, tally(item).map((x) =>
+    h('div', { class: `opt-mini ${done && item.winner === x.i ? 'win' : ''}` },
+      h('span', { class: 'bar', style: `width:${Math.round((x.n / CFG.team.length) * 100)}%` }),
+      h('span', { class: 'lbl' }, x.opt),
+      h('span', { class: 'n' }, x.n))));
+}
+
 function cardEl(item) {
   const cover = item.files[item.files.length - 1];
-  const thumb = cover
+  const decision = item.type === 'rozhodnuti';
+  const thumb = decision ? decisionMini(item) : cover
     ? h('div', { class: 'thumb bg-check' }, fitPixels(imgEl(cover), 0.8))
     : item.external[0]
       ? h('div', { class: 'thumb bg-check' }, h('img', { src: item.external[0], alt: '' }))
@@ -409,19 +549,59 @@ function cardEl(item) {
     thumb,
     h('div', { class: 'body' },
       h('div', { class: 'tags' },
-        h('span', { class: `badge ${item.state}` }, STATE_NAMES[item.state]),
-        item.type === 'grafika' && h('span', { class: 'badge' }, 'grafika'),
+        h('span', { class: `badge ${item.state}` }, stateName(item)),
+        item.type !== 'napad' && h('span', { class: 'badge' }, TYPE_NAMES[item.type]),
         item.cats.map((c) => h('span', { class: 'badge' }, c)),
         item.files.length > 1 && h('span', { class: 'badge' }, `v${item.files.length}`)),
       h('h3', {}, item.title),
       h('div', { class: 'meta' },
-        h('span', {}, `👍 ${item.up}`), h('span', {}, `👎 ${item.down}`),
-        h('span', {}, `💬 ${item.comments}`),
+        decision
+          ? h('span', {}, `🗳️ ${item.ballots?.size ?? '…'}/${CFG.team.length}`)
+          : [h('span', {}, `👍 ${item.up}`), h('span', {}, `👎 ${item.down}`)],
+        h('span', {}, `💬 ${item.talk ?? item.comments}`),
         h('span', { class: 'grow' }),
         votersEl(item))));
 }
 
+function taskEl(item) {
+  const col = column(item);
+  const blk = col === 'hotovo' ? [] : blockedBy(item);
+  const pct = item.checks.total ? Math.round((item.checks.done / item.checks.total) * 100) : 0;
+  return h('button', { class: `task ${col}`, 'data-n': item.number, onclick: () => openDetail(item) },
+    h('div', { class: 'task-top' },
+      h('span', { class: 'muted small' }, `#${item.number}`),
+      blk.length > 0 && h('span', { class: 'badge zamitnuto' }, `čeká na ${blk.map((n) => '#' + n).join(', ')}`)),
+    h('h3', {}, item.title),
+    item.checks.total > 0 && h('div', { class: 'progress' }, h('span', { style: `width:${pct}%` })),
+    h('div', { class: 'meta' },
+      item.checks.total > 0 && h('span', {}, `${item.checks.done}/${item.checks.total}`),
+      h('span', { class: 'grow' }),
+      item.assignees.map((a) => h('span', { class: 'who-chip' }, avatar(a), `${col === 'dela' ? '🔨 ' : ''}${nameOf(a)}`))));
+}
+
+function renderBoard() {
+  const tasks = state.items.filter((i) => i.type === 'stavba');
+  const cols = [
+    ['rada', 'Na řadě', 'Zatím nic. Schválené nápady rozdělí Claude na úkoly.'],
+    ['dela', 'Dělá se', 'Nikdo na ničem nedělá.'],
+    ['hotovo', 'Hotovo', '—'],
+  ];
+  $('#board').replaceChildren(...cols.map(([k, label, empty]) => {
+    const list = tasks.filter((t) => column(t) === k)
+      .sort((a, b) => (k === 'hotovo' ? b.number - a.number : a.number - b.number));
+    return h('section', { class: 'col' },
+      h('h2', {}, label, h('span', { class: 'muted' }, ` ${list.length}`)),
+      list.length ? list.map(taskEl) : h('p', { class: 'muted small' }, empty));
+  }));
+}
+
 function render() {
+  const stavba = state.tab === 'stavba';
+  $('.filters').hidden = stavba;
+  $('#grid').hidden = stavba;
+  $('#board').hidden = !stavba;
+  $('#cat-filter').hidden = !(state.tab === 'vse' || CATS[state.tab]);
+  if (stavba) { $('#empty').hidden = true; return renderBoard(); }
   const list = visible();
   $('#grid').replaceChildren(...list.map(cardEl));
   $('#empty').hidden = list.length > 0;
@@ -429,12 +609,13 @@ function render() {
 }
 
 function updateCard(item) {
+  if (item.type === 'stavba') return render();
   const old = document.querySelector(`.card[data-n="${item.number}"]`);
   if (old) old.replaceWith(cardEl(item));
 }
 
 function fillCatSelect(sel, type, withAll) {
-  const cats = type === 'vse' ? [...CATS.napad, ...CATS.grafika] : CATS[type];
+  const cats = type === 'vse' ? [...CATS.napad, ...CATS.grafika] : CATS[type] || [];
   sel.replaceChildren(
     withAll ? h('option', { value: '' }, 'Všechny oblasti') : h('option', { value: '' }, '— bez oblasti —'),
     ...cats.map((c) => h('option', { value: c }, c)));
@@ -452,13 +633,13 @@ async function openDetail(item) {
   viewer.edit = null;
   drawDetail(item);
   if (!dlg.open) dlg.showModal();
-  if (!item.reactions) { await loadReactions(item).catch(() => {}); drawDetail(item); }
+  if (!hasExtras(item)) { await loadExtras(item).catch(() => {}); drawDetail(item); }
 }
 
 async function refreshItem(item) {
   const fresh = parseIssue(await gh(`${REPO}/issues/${item.number}`));
   Object.assign(item, fresh);
-  await loadReactions(item);
+  await loadExtras(item);
   updateCard(item);
   if ($('#detail').open) drawDetail(item);
   render();
@@ -562,6 +743,107 @@ function seg(options, current, onPick) {
     h('button', { class: val === current ? 'on' : '', onclick: () => onPick(val) }, label)));
 }
 
+const busy = (btn, fn) => async () => {
+  btn.disabled = true;
+  try { await fn(); } catch (e) { if (e.message !== 'Zrušeno') toast(e.message, true); } finally { btn.disabled = false; }
+};
+
+function stateBtn(item, label, cls, st, confirmMsg, extra) {
+  const b = h('button', { class: `btn ${cls}` }, label);
+  b.onclick = busy(b, async () => {
+    if (confirmMsg && !confirm(confirmMsg)) return;
+    const note = extra ? await extra() : null;
+    await setState(item, st, note);
+    toast(`#${item.number}: ${STATE_NAMES[st]}`);
+    await refreshItem(item);
+  });
+  return b;
+}
+
+// ✏ Upravit a 🗑 Smazat: jen pro autora příspěvku (a správce repa).
+function authorBtns(item, redraw) {
+  if (item.author !== state.me.login && !state.admin) return [];
+  const out = [];
+  if (!viewer.edit) {
+    out.push(h('button', { class: 'btn', onclick: () => {
+      viewer.edit = { title: item.title, desc: rawDesc(item), files: [...item.files], added: [] };
+      redraw();
+    } }, '✏ Upravit'));
+  }
+  const del = h('button', { class: 'btn no', title: 'Smazat příspěvek' }, '🗑 Smazat');
+  del.onclick = busy(del, async () => {
+    const kept = item.state === 'schvaleno' && item.type === 'grafika' ? '\nSchválená kopie v docs/art/ zůstane.' : '';
+    const how = state.admin ? 'Smaže se úplně i s obrázky a nejde to vrátit.' : 'Zmizí z nástěnky, na GitHubu zůstane zavřený.';
+    if (!confirm(`Smazat „${item.title}"?\n${how}${kept}`)) return;
+    await deleteItem(item);
+    state.items = state.items.filter((i) => i !== item);
+    $('#detail').close();
+    render();
+    toast('Smazáno');
+  });
+  out.push(del);
+  return out;
+}
+
+function decisionPanel(item, redraw) {
+  const t = tally(item);
+  const mine = item.ballots?.get(state.me.login);
+  const done = item.state === 'schvaleno';
+  const rows = h('div', { class: 'opts' }, t.map((x) => {
+    const win = done && item.winner === x.i;
+    const b = h('button', { class: `opt ${mine?.o === x.i ? 'mine' : ''} ${win ? 'win' : ''}`, disabled: done || !item.ballots },
+      h('span', { class: 'bar', style: `width:${Math.round((x.n / CFG.team.length) * 100)}%` }),
+      h('span', { class: 'lbl' }, (win ? '✅ ' : '') + x.opt),
+      h('span', { class: 'voters' }, x.voters.map((l) => avatar(l))),
+      h('span', { class: 'n' }, x.n));
+    b.onclick = busy(b, async () => { await castBallot(item, x.i); updateCard(item); redraw(); });
+    return b;
+  }));
+  const missing = CFG.team.filter((m) => !item.ballots?.has(m.login)).map((m) => m.name);
+  const info = h('p', { class: 'muted small', style: 'margin:0' },
+    done ? `Rozhodnuto${item.meta.record ? ` · záznam v ${item.meta.record}` : ''}`
+      : !item.ballots ? 'Načítám hlasy…'
+        : missing.length ? `Klikni na možnost, pro kterou hlasuješ. Ještě nehlasoval: ${missing.join(', ')}`
+          : 'Hlasovali všichni ✅');
+  const actions = h('div', { class: 'row' });
+  if (!done) {
+    const c = h('button', { class: 'btn yes' }, '✅ Uzavřít rozhodnutí');
+    c.onclick = busy(c, async () => { await closeDecision(item); toast('Rozhodnuto'); await refreshItem(item); });
+    actions.append(c);
+    if (item.state !== 'diskuse') actions.append(stateBtn(item, '💬 Do diskuse', 'talk', 'diskuse'));
+  } else {
+    actions.append(stateBtn(item, '↺ Znovu otevřít', '', 'novy'));
+  }
+  actions.append(...authorBtns(item, redraw));
+  return [rows, info, actions];
+}
+
+function taskPanel(item, redraw) {
+  const col = column(item);
+  const mineTask = item.assignees.includes(state.me.login);
+  const blk = col === 'hotovo' ? [] : blockedBy(item);
+  const status = h('p', { style: 'margin:0' },
+    col === 'hotovo' ? '✓ Hotovo' : col === 'dela' ? `🔨 Dělá ${item.assignees.map(nameOf).join(', ')}` : 'Na řadě',
+    blk.length ? ` · čeká na ${blk.map((n) => '#' + n).join(', ')}` : '',
+    item.checks.total ? ` · ${item.checks.done}/${item.checks.total} splněno` : '');
+  const btn = (label, cls, fn) => {
+    const b = h('button', { class: `btn ${cls}` }, label);
+    b.onclick = busy(b, async () => { await fn(); await refreshItem(item); });
+    return b;
+  };
+  const actions = h('div', { class: 'row' });
+  if (col !== 'hotovo') {
+    actions.append(mineTask
+      ? btn('Pustit', '', () => claim(item, false))
+      : btn(col === 'dela' ? '🔨 Převzít' : '🔨 Beru si to', 'primary', () => claim(item, true)));
+    actions.append(btn('✓ Hotovo', 'yes', () => setDone(item, true)));
+  } else {
+    actions.append(btn('↺ Vrátit do práce', '', () => setDone(item, false)));
+  }
+  actions.append(...authorBtns(item, redraw));
+  return [status, actions];
+}
+
 function drawDetail(item) {
   const dlg = $('#detail');
   const hasImg = item.files.length || item.external.length;
@@ -589,10 +871,6 @@ function drawDetail(item) {
   }
 
   const mine = myVote(item);
-  const busy = (btn, fn) => async () => {
-    btn.disabled = true;
-    try { await fn(); } catch (e) { if (e.message !== 'Zrušeno') toast(e.message, true); } finally { btn.disabled = false; }
-  };
 
   const upBtn = h('button', { class: `btn yes ${mine?.content === '+1' ? 'mine' : ''}` }, `👍 Pro  ${item.up}`);
   const downBtn = h('button', { class: `btn no ${mine?.content === '-1' ? 'mine' : ''}` }, `👎 Proti  ${item.down}`);
@@ -611,18 +889,7 @@ function drawDetail(item) {
     `${yes} z ${CFG.team.length} pro` + (yes > CFG.team.length / 2 ? ' · většina souhlasí ✅' : ''));
 
   const actions = h('div', { class: 'row' });
-  const act = (label, cls, st, confirmMsg, extra) => {
-    const b = h('button', { class: `btn ${cls}` }, label);
-    b.onclick = busy(b, async () => {
-      if (confirmMsg && !confirm(confirmMsg)) return;
-      let note = null;
-      if (extra) note = await extra();
-      await setState(item, st, note);
-      toast(`#${item.number}: ${STATE_NAMES[st]}`);
-      await refreshItem(item);
-    });
-    return b;
-  };
+  const act = (...args) => stateBtn(item, ...args);
   if (item.state !== 'schvaleno') {
     actions.append(act('✅ Schválit', 'yes', 'schvaleno',
       `Schválit „${item.title}"? (${yes} z ${CFG.team.length} pro)` +
@@ -642,26 +909,7 @@ function drawDetail(item) {
     }));
   }
   if (item.state === 'schvaleno' || item.state === 'zamitnuto') actions.append(act('↺ Znovu otevřít', '', 'novy'));
-  if (item.author === state.me.login || state.admin) {
-    if (!viewer.edit) {
-      actions.append(h('button', { class: 'btn', onclick: () => {
-        viewer.edit = { title: item.title, desc: rawDesc(item), files: [...item.files], added: [] };
-        redraw();
-      } }, '✏ Upravit'));
-    }
-    const del = h('button', { class: 'btn no', title: 'Smazat příspěvek' }, '🗑 Smazat');
-    del.onclick = busy(del, async () => {
-      const kept = item.state === 'schvaleno' && item.type === 'grafika' ? '\nSchválená kopie v docs/art/ zůstane.' : '';
-      const how = state.admin ? 'Smaže se úplně i s obrázky a nejde to vrátit.' : 'Zmizí z nástěnky, na GitHubu zůstane zavřený.';
-      if (!confirm(`Smazat „${item.title}"?\n${how}${kept}`)) return;
-      await deleteItem(item);
-      state.items = state.items.filter((i) => i !== item);
-      $('#detail').close();
-      render();
-      toast('Smazáno');
-    });
-    actions.append(del);
-  }
+  actions.append(...authorBtns(item, redraw));
 
   let versionEl = null;
   if (item.type === 'grafika') {
@@ -693,22 +941,25 @@ function drawDetail(item) {
   });
   ta.addEventListener('keydown', (e) => { if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) send.click(); });
 
+  const middle = item.type === 'rozhodnuti' ? decisionPanel(item, redraw)
+    : item.type === 'stavba' ? taskPanel(item, redraw)
+      : [h('div', { class: 'vote-row' }, upBtn, downBtn), teamVotes, verdict, actions, versionEl];
+  const desc = item.type === 'stavba'
+    ? item.desc.replace(/^(\s*)- \[x\]/gim, '$1☑').replace(/^(\s*)- \[ \]/gm, '$1☐').replace(/^#+ /gm, '')
+    : item.desc;
+
   const side = h('div', { class: 'side' },
     h('div', { class: 'tags' },
-      h('span', { class: `badge ${item.state}` }, STATE_NAMES[item.state]),
-      h('span', { class: 'badge' }, item.type === 'grafika' ? 'grafika' : 'nápad'),
+      item.type !== 'stavba' && h('span', { class: `badge ${item.state}` }, stateName(item)),
+      h('span', { class: 'badge' }, TYPE_NAMES[item.type]),
       item.cats.map((c) => h('span', { class: 'badge' }, c))),
     viewer.edit ? editForm(item, redraw) : [
       h('h2', {}, item.title),
       h('div', { class: 'muted small' },
         `#${item.number} · ${nameOf(item.author)} · ${relTime(item.created)} · `,
         h('a', { href: item.url, target: '_blank', rel: 'noopener', class: 'gh-link' }, 'otevřít na GitHubu ↗')),
-      item.desc && h('p', { class: 'desc' }, item.desc)],
-    h('div', { class: 'vote-row' }, upBtn, downBtn),
-    teamVotes,
-    verdict,
-    actions,
-    versionEl,
+      desc && h('p', { class: 'desc' }, desc)],
+    middle,
     h('p', { class: 'section-title' }, 'Komentáře'),
     commentsEl,
     h('div', { class: 'comment-form' }, ta, h('div', { class: 'row end' }, h('span', { class: 'muted small' }, '⌘/Ctrl + Enter'), send)));
@@ -762,7 +1013,7 @@ function editForm(item, redraw) {
   return h('div', { class: 'edit' },
     h('label', {}, 'Název', title),
     h('label', {}, 'Popis', desc),
-    h('div', { class: 'edit-pics' }, 'Obrázky', pics,
+    (item.type === 'napad' || item.type === 'grafika') && h('div', { class: 'edit-pics' }, 'Obrázky', pics,
       h('div', {}, h('button', { class: 'btn', type: 'button', onclick: () => input.click() }, '+ Přidat obrázek'), input)),
     h('div', { class: 'row end' },
       h('button', { class: 'btn', onclick: () => { viewer.edit = null; redraw(); } }, 'Zrušit'),
@@ -771,7 +1022,7 @@ function editForm(item, redraw) {
 
 async function loadComments(item, el) {
   try {
-    const list = await ghAll(`${REPO}/issues/${item.number}/comments`);
+    const list = (await ghAll(`${REPO}/issues/${item.number}/comments`)).filter((c) => !BALLOT_RE.test(c.body));
     el.replaceChildren(...(list.length ? list.map((c) =>
       h('div', { class: 'comment' },
         h('div', { class: 'who' }, h('img', { src: c.user.avatar_url + '&s=36', alt: '' }), nameOf(c.user.login), ' · ', relTime(c.created_at)),
@@ -786,15 +1037,35 @@ async function loadComments(item, el) {
 
 const compose = { type: 'napad', files: [] };
 
-function openCompose(type) {
-  compose.type = type;
-  compose.files = [];
+const COMPOSE = {
+  napad: { hint: 'Cokoli, co by mohlo být ve hře. Hlasuje se 👍 / 👎.', ph: 'Např. Rybaření u jezera' },
+  grafika: { hint: 'Návrh postavy, prostředí, předmětu… Pixel art nahraj v původní velikosti.', ph: 'Např. Kovář — první verze' },
+  rozhodnuti: { hint: 'Otázka s možnostmi. Každý hlasuje pro jednu, po uzavření se zapíše do docs/rozhodnuti/.', ph: 'Např. Jaký bude pohled kamery?' },
+  stavba: { hint: 'Technický úkol do Stavby. Většinou je zakládá Claude ze schválených nápadů.', ph: 'Např. Pohyb hráče po mapě' },
+};
+
+function setComposeType(type) {
   const f = $('#compose-form');
-  f.reset();
-  $('#compose-title').textContent = type === 'grafika' ? 'Nový návrh grafiky' : 'Nový nápad';
-  f.elements.title.placeholder = type === 'grafika' ? 'Např. Kovář — první verze' : 'Např. Rybaření u jezera';
-  fillCatSelect($('#compose-cat'), type, false);
+  const body = f.elements.body;
+  if (compose.type === 'stavba' && body.value === STAVBA_TEMPLATE) body.value = '';
+  compose.type = type;
+  if (type === 'stavba' && !body.value.trim()) body.value = STAVBA_TEMPLATE;
+  for (const b of document.querySelectorAll('#compose-type button')) b.classList.toggle('on', b.dataset.type === type);
+  $('#compose-hint').textContent = COMPOSE[type].hint;
+  f.elements.title.placeholder = COMPOSE[type].ph;
+  const withCats = type === 'napad' || type === 'grafika';
+  $('#cat-wrap').hidden = !withCats;
+  $('#drop').hidden = !withCats;
+  $('#opts-wrap').hidden = type !== 'rozhodnuti';
+  if (withCats) fillCatSelect($('#compose-cat'), type, false);
   $('#compose-err').textContent = '';
+}
+
+function openCompose(type) {
+  compose.files = [];
+  compose.type = null;
+  $('#compose-form').reset();
+  setComposeType(type);
   drawPreviews();
   $('#compose').showModal();
 }
@@ -816,6 +1087,7 @@ function drawPreviews() {
 }
 
 function setupCompose() {
+  for (const b of document.querySelectorAll('#compose-type button')) b.onclick = () => setComposeType(b.dataset.type);
   const drop = $('#drop');
   $('#pick').onclick = (e) => { e.preventDefault(); $('#files').click(); };
   $('#files').onchange = (e) => { addFiles(e.target.files); e.target.value = ''; };
@@ -835,17 +1107,25 @@ function setupCompose() {
       $('#compose-err').textContent = 'Návrh grafiky potřebuje aspoň jeden obrázek.';
       return;
     }
+    const options = f.elements.opts.value.split('\n').map((x) => x.trim()).filter(Boolean);
+    if (compose.type === 'rozhodnuti' && options.length < 2) {
+      $('#compose-err').textContent = 'Rozhodnutí potřebuje aspoň dvě možnosti, každou na nový řádek.';
+      return;
+    }
     const btn = $('#compose-send');
     btn.disabled = true;
     btn.textContent = compose.files.length ? 'Nahrávám obrázky…' : 'Přidávám…';
     try {
       const issue = await createItem({
-        type: compose.type, title: f.elements.title.value.trim(), desc: f.elements.body.value, cat: f.elements.cat.value, files: compose.files,
+        type: compose.type, title: f.elements.title.value.trim(), desc: f.elements.body.value,
+        cat: f.elements.cat.value, files: compose.files, options,
       });
       $('#compose').close();
       toast(`Přidáno jako #${issue.number}`);
       const item = parseIssue(issue);
       item.reactions = [];
+      item.ballots = new Map();
+      item.talk = 0;
       state.items.unshift(item);
       state.states.add('novy');
       syncChips();
@@ -871,7 +1151,7 @@ function setupUi() {
       state.tab = b.dataset.tab;
       state.cat = '';
       document.querySelectorAll('#tabs button').forEach((x) => x.classList.toggle('on', x === b));
-      fillCatSelect($('#cat-filter'), state.tab, true);
+      if (state.tab === 'vse' || CATS[state.tab]) fillCatSelect($('#cat-filter'), state.tab, true);
       render();
     };
   }
@@ -885,8 +1165,7 @@ function setupUi() {
   }
   $('#cat-filter').onchange = (e) => { state.cat = e.target.value; render(); };
   fillCatSelect($('#cat-filter'), 'vse', true);
-  $('#new-napad').onclick = () => openCompose('napad');
-  $('#new-grafika').onclick = () => openCompose('grafika');
+  $('#new-item').onclick = () => openCompose(state.tab === 'vse' ? 'napad' : state.tab);
   $('#refresh').onclick = () => { imgCache.clear(); loadItems().catch((e) => toast(e.message, true)); };
   $('#me').onclick = () => {
     if (confirm('Odhlásit? Klíč se z tohoto prohlížeče smaže.')) { store(TOKEN_KEY, null); location.reload(); }

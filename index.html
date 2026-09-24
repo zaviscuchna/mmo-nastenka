@@ -40,10 +40,11 @@
       <button data-tab="vse" class="on">Vše</button>
       <button data-tab="napad">Nápady</button>
       <button data-tab="grafika">Grafika</button>
+      <button data-tab="rozhodnuti">Rozhodnutí</button>
+      <button data-tab="stavba">Stavba</button>
     </nav>
     <div class="top-actions">
-      <button class="btn" id="new-napad">+ Nápad</button>
-      <button class="btn primary" id="new-grafika">+ Grafika</button>
+      <button class="btn primary" id="new-item">+ Přidat</button>
       <button class="icon-btn" id="refresh" title="Načíst znovu">⟳</button>
       <img id="me" class="avatar" alt="" title="Odhlásit">
     </div>
@@ -63,6 +64,7 @@
   </div>
 
   <main id="grid" class="grid"></main>
+  <main id="board" class="board" hidden></main>
   <p id="empty" class="empty" hidden>Nic tu není. Přidej první nápad nebo návrh.</p>
 </div>
 
@@ -72,15 +74,25 @@
 <!-- Nový příspěvek -->
 <dialog id="compose" class="dlg compose">
   <form id="compose-form" method="dialog">
-    <h2 id="compose-title">Nový nápad</h2>
+    <h2 id="compose-title">Přidat</h2>
+    <div class="type-seg" id="compose-type">
+      <button type="button" data-type="napad">Nápad</button>
+      <button type="button" data-type="grafika">Grafika</button>
+      <button type="button" data-type="rozhodnuti">Rozhodnutí</button>
+      <button type="button" data-type="stavba">Úkol</button>
+    </div>
+    <p class="muted small" id="compose-hint" style="margin:0"></p>
     <label>Název
       <input name="title" required maxlength="120" placeholder="Např. Rybaření u jezera">
     </label>
-    <label>Oblast
+    <label id="cat-wrap">Oblast
       <select name="cat" id="compose-cat"></select>
     </label>
     <label>Popis
       <textarea name="body" rows="5" placeholder="Klidně jedna věta."></textarea>
+    </label>
+    <label id="opts-wrap" hidden>Možnosti (každá na nový řádek, aspoň dvě)
+      <textarea name="opts" rows="4" placeholder="Top-down&#10;Izometrie&#10;Boční pohled"></textarea>
     </label>
     <div class="drop" id="drop">
       <input type="file" id="files" accept="image/*" multiple hidden>

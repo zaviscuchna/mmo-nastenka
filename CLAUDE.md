@@ -23,13 +23,19 @@ https://zaviscuchna.github.io/mmo-nastenka/ (obnovit stránku).
 - Statická stránka bez buildu: `index.html`, `style.css`, `app.js` (vanilla JS, ES modul).
 - Data NEJSOU tady. Jsou v soukromém repu `zaviscuchna/mmo-rpg` a nástěnka je čte
   a zapisuje přes GitHub API klíčem přihlášeného člověka:
-  - příspěvek = issue se štítkem `nápad` nebo `grafika`
+  - příspěvek = issue se štítkem `nápad`, `grafika`, `rozhodnutí` nebo `stavba`
   - stav = štítek `diskuse` / `schváleno` / `zamítnuto`, bez štítku = nový
   - skrytý (smazaný ne-správcem) = štítek `smazáno`
   - hlas = reakce 👍 / 👎 na issue
   - obrázky = soubory v `board/navrhy/…/vN.ext`, seznam je v těle issue
     v komentáři `<!-- nastenka {"files":[...]} -->`
   - schválená grafika se kopíruje do `docs/art/<kategorie>/`
+  - rozhodnutí: možnosti v `{"options":[...]}`, hlas = komentář `<!-- hlas {"o":N} -->`
+    (jeden na člověka, změna = úprava komentáře), po uzavření `winner` + `record`
+    a zápis `docs/rozhodnuti/NNN-nazev.md`
+  - stavba (úkol): kdo dělá = assignee, hotovo = zavřené issue, postup = `- [x]` v těle,
+    závislosti = řádek `Závisí na: #12, #13`. Tenhle formát používá i Claude v herním repu
+    (viz jeho `CLAUDE.md`), takže ho neměň bez úpravy obou míst.
 - Nastavení (repo, tým, jména) je v `CFG` na začátku `app.js`.
 
 ## Co se NESMÍ rozbít
