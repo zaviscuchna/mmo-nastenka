@@ -916,12 +916,15 @@ function drawDetail(item) {
   actions.append(...authorBtns(item, redraw));
 
   let versionEl = null;
+  // Nové verze grafiky: tlačítkem, nebo přetažením obrázků kamkoli do okna návrhu.
+  let nahrajVerze = null;
   if (item.type === 'grafika') {
     const input = h('input', { type: 'file', accept: 'image/*', multiple: true, hidden: true });
-    const btn = h('button', { class: 'btn', title: 'Můžeš vybrat víc obrázků naráz (Ctrl / Shift)', onclick: () => input.click() }, '⬆ Nahrát nové verze');
-    input.onchange = busy(btn, async () => {
-      const fs = obrazky(input.files);
-      input.value = '';
+    const btn = h('button', { class: 'btn', title: 'Můžeš vybrat víc obrázků naráz (Ctrl / Shift) nebo je sem přetáhnout', onclick: () => input.click() }, '⬆ Nahrát nové verze');
+    let cekajici = [];
+    const nahraj = busy(btn, async () => {
+      const fs = cekajici;
+      cekajici = [];
       if (!fs.length) return;
       const note = prompt(fs.length > 1 ? `Co se v ${fs.length} verzích změnilo? (nepovinné)` : 'Co se ve verzi změnilo? (nepovinné)') || '';
       await addVersions(item, fs, note);
@@ -930,7 +933,9 @@ function drawDetail(item) {
       viewer.version = item.files.length - 1;
       redraw();
     });
-    versionEl = h('div', {}, btn, input);
+    input.onchange = () => { cekajici = obrazky(input.files); input.value = ''; nahraj(); };
+    nahrajVerze = (list) => { if (btn.disabled) return; cekajici = obrazky(list); nahraj(); };
+    versionEl = h('div', {}, btn, input, h('p', { class: 'muted small' }, 'Nebo přetáhni obrázky do okna.'));
   }
 
   const commentsEl = h('div', { class: 'comments' }, h('p', { class: 'muted small' }, 'Načítám komentáře…'));
@@ -969,10 +974,22 @@ function drawDetail(item) {
     commentsEl,
     h('div', { class: 'comment-form' }, ta, h('div', { class: 'row end' }, h('span', { class: 'muted small' }, '⌘/Ctrl + Enter'), send)));
 
-  dlg.replaceChildren(
-    h('div', { class: `detail-grid ${hasImg ? '' : 'no-image'}`, style: 'position:relative' },
-      viewerEl, side,
-      h('button', { class: 'icon-btn close', title: 'Zavřít', onclick: () => dlg.close() }, '✕')));
+  const grid = h('div', { class: `detail-grid ${hasImg ? '' : 'no-image'}`, style: 'position:relative' },
+    viewerEl, side,
+    h('button', { class: 'icon-btn close', title: 'Zavřít', onclick: () => dlg.close() }, '✕'));
+  // Při úpravě má přetažení vlastní pole (editForm), jinak by se obrázky nahrály dvakrát.
+  if (nahrajVerze && !viewer.edit) {
+    const soubory = (e) => [...(e.dataTransfer?.types || [])].includes('Files');
+    grid.addEventListener('dragover', (e) => { if (!soubory(e)) return; e.preventDefault(); grid.classList.add('drop-verze'); });
+    grid.addEventListener('dragleave', (e) => { if (!grid.contains(e.relatedTarget)) grid.classList.remove('drop-verze'); });
+    grid.addEventListener('drop', (e) => {
+      if (!soubory(e)) return;
+      e.preventDefault();
+      grid.classList.remove('drop-verze');
+      nahrajVerze(e.dataTransfer.files);
+    });
+  }
+  dlg.replaceChildren(grid);
   loadComments(item, commentsEl);
 }
 

@@ -159,6 +159,11 @@ input:focus, select:focus, textarea:focus { outline: 2px solid var(--accent); ou
 
 .drop { border: 2px dashed var(--line); border-radius: 8px; padding: 12px; text-align: center; font-size: 14px; }
 .drop.over { border-color: var(--accent); background: var(--panel-2); }
+.detail-grid.drop-verze { outline: 3px dashed var(--accent); outline-offset: -3px; }
+.detail-grid.drop-verze::after {
+  content: 'Pusť obrázky = nové verze'; position: absolute; inset: 0; display: grid; place-items: center;
+  background: rgba(20, 18, 26, .75); color: var(--accent); font-size: 20px; font-weight: bold; pointer-events: none; z-index: 5;
+}
 .drop p { margin: 4px 0; }
 .previews { display: flex; gap: 8px; flex-wrap: wrap; justify-content: center; }
 .previews figure { margin: 0; position: relative; }
