@@ -1069,6 +1069,103 @@ async function loadComments(item, el) {
   }
 }
 
+// ---------- návod na obrázky ----------
+
+// Celý návod na generování grafiky (docs/art/navod-na-obrazky.md v herním repu). Čte se jako ostatní
+// data přes API a klíčem přihlášeného; ukáže se v okně, prompty jdou kopírovat, celý soubor stáhnout.
+const NAVOD = 'docs/art/navod-na-obrazky.md';
+
+async function openNavod() {
+  const dlg = $('#navod-dlg');
+  dlg.replaceChildren(h('p', { class: 'muted' }, 'Načítám návod…'));
+  if (!dlg.open) dlg.showModal();
+  try {
+    const res = await gh(`${REPO}/contents/${NAVOD}?ref=${CFG.branch}`, { accept: 'application/vnd.github.raw', raw: true });
+    const text = await res.text();
+    const stahnout = h('button', { class: 'btn primary', onclick: () => {
+      const url = URL.createObjectURL(new Blob([text], { type: 'text/markdown;charset=utf-8' }));
+      const a = h('a', { href: url, download: 'navod-na-obrazky.md' });
+      document.body.append(a);
+      a.click();
+      a.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 1000);
+    } }, '⬇ Stáhnout .md');
+    const kopirovat = h('button', { class: 'btn', onclick: () => zkopiruj(text, 'Celý návod zkopírovaný') }, 'Kopírovat vše');
+    dlg.replaceChildren(
+      h('div', { class: 'navod-hlava' },
+        h('h2', {}, '📄 Návod na obrázky'),
+        h('div', { class: 'row' }, kopirovat, stahnout,
+          h('a', { href: `https://github.com/${CFG.owner}/${CFG.repo}/blob/${CFG.branch}/${NAVOD}`, target: '_blank', rel: 'noopener', class: 'gh-link' }, 'GitHub ↗'),
+          h('button', { class: 'icon-btn', title: 'Zavřít', onclick: () => dlg.close() }, '✕'))),
+      h('div', { class: 'navod-text' }, ...markdown(text)));
+  } catch (e) {
+    dlg.replaceChildren(h('p', { class: 'err' }, e.message), h('button', { class: 'btn', onclick: () => dlg.close() }, 'Zavřít'));
+  }
+}
+
+async function zkopiruj(text, hlaska) {
+  try {
+    await navigator.clipboard.writeText(text);
+    toast(hlaska);
+  } catch {
+    toast('Kopírování se nepovedlo, označ text ručně', true);
+  }
+}
+
+/** Řádek markdownu na uzly: **tučně**, `kód`, [odkaz](url) jen jako text. Všechno přes textContent. */
+function radekMd(t) {
+  const out = [];
+  const re = /\*\*(.+?)\*\*|`([^`]+)`|\[([^\]]+)\]\([^)]*\)/g;
+  let pos = 0;
+  for (const m of t.matchAll(re)) {
+    if (m.index > pos) out.push(t.slice(pos, m.index));
+    if (m[1] !== undefined) out.push(h('b', {}, m[1].replace(/`/g, '')));
+    else if (m[2] !== undefined) out.push(h('code', {}, m[2]));
+    else out.push(h('span', { class: 'odkaz' }, m[3].replace(/`/g, '')));
+    pos = m.index + m[0].length;
+  }
+  if (pos < t.length) out.push(t.slice(pos));
+  return out;
+}
+
+/** Jednoduchý markdown (nadpisy, odstavce, seznamy, citace, tabulky, bloky kódu) na DOM, bez innerHTML. */
+function markdown(text) {
+  const out = [];
+  const radky = text.replace(/\r\n/g, '\n').split('\n');
+  for (let i = 0; i < radky.length; i++) {
+    const r = radky[i];
+    if (r.startsWith('```')) {
+      const kod = [];
+      for (i++; i < radky.length && !radky[i].startsWith('```'); i++) kod.push(radky[i]);
+      const obsah = kod.join('\n');
+      out.push(h('div', { class: 'prompt' },
+        h('button', { class: 'btn small-btn', onclick: () => zkopiruj(obsah, 'Prompt zkopírovaný') }, 'Kopírovat'),
+        h('pre', {}, obsah)));
+    } else if (/^#{1,4} /.test(r)) {
+      const uroven = r.match(/^#+/)[0].length;
+      out.push(h(`h${Math.min(5, uroven + 1)}`, {}, ...radekMd(r.replace(/^#+ /, ''))));
+    } else if (r.startsWith('|')) {
+      const tab = [];
+      for (; i < radky.length && radky[i].startsWith('|'); i++) tab.push(radky[i]);
+      i--;
+      const bunky = (l) => l.replace(/^\||\|$/g, '').split('|').map((c) => c.trim());
+      const [hlavicka, , ...telo] = tab;
+      out.push(h('table', {},
+        h('tr', {}, ...bunky(hlavicka).map((c) => h('th', {}, ...radekMd(c)))),
+        ...telo.map((l) => h('tr', {}, ...bunky(l).map((c) => h('td', {}, ...radekMd(c)))))));
+    } else if (r.startsWith('>')) {
+      out.push(h('blockquote', {}, ...radekMd(r.replace(/^>\s?/, ''))));
+    } else if (/^\s*(- |\d+\. )/.test(r)) {
+      out.push(h('p', { class: 'li' }, ...radekMd(r.trim())));
+    } else if (r.trim() === '---') {
+      out.push(h('hr'));
+    } else if (r.trim()) {
+      out.push(h('p', {}, ...radekMd(r)));
+    }
+  }
+  return out;
+}
+
 // ---------- nový příspěvek ----------
 
 const compose = { type: 'napad', files: [] };
@@ -1202,6 +1299,8 @@ function setupUi() {
   $('#cat-filter').onchange = (e) => { state.cat = e.target.value; render(); };
   fillCatSelect($('#cat-filter'), 'vse', true);
   $('#new-item').onclick = () => openCompose(state.tab === 'vse' ? 'napad' : state.tab);
+  $('#navod').onclick = () => openNavod();
+  $('#navod-dlg').addEventListener('click', (e) => { if (e.target === e.currentTarget) e.currentTarget.close(); });
   $('#refresh').onclick = () => { imgCache.clear(); loadItems().catch((e) => toast(e.message, true)); };
   $('#me').onclick = () => {
     if (confirm('Odhlásit? Klíč se z tohoto prohlížeče smaže.')) { store(TOKEN_KEY, null); location.reload(); }

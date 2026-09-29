@@ -280,3 +280,22 @@ input:focus, select:focus, textarea:focus { outline: 2px solid var(--accent); ou
   .side { overflow: visible; }
 }
 .detail:has(.no-image) { max-width: min(680px, calc(100vw - 32px)); }
+
+/* Návod na obrázky (📄 v hlavičce) */
+.dlg.navod { width: min(900px, 96vw); max-height: 92vh; padding: 0; display: flex; flex-direction: column; }
+.dlg.navod:not([open]) { display: none; }
+.navod-hlava { display: flex; justify-content: space-between; align-items: center; gap: 12px; padding: 12px 16px; border-bottom: 1px solid var(--line); flex-wrap: wrap; }
+.navod-hlava h2 { margin: 0; font-size: 18px; }
+.navod-hlava .row { display: flex; gap: 8px; align-items: center; }
+.navod-text { overflow-y: auto; padding: 8px 20px 24px; line-height: 1.5; font-size: 14px; }
+.navod-text h2, .navod-text h3, .navod-text h4, .navod-text h5 { margin: 18px 0 6px; }
+.navod-text p { margin: 4px 0; }
+.navod-text p.li { padding-left: 14px; }
+.navod-text blockquote { margin: 6px 0; padding: 4px 10px; border-left: 3px solid var(--accent); color: var(--muted); }
+.navod-text code { background: var(--panel-2); padding: 0 4px; border-radius: 3px; }
+.navod-text .odkaz { text-decoration: underline dotted; }
+.navod-text table { border-collapse: collapse; margin: 8px 0; font-size: 13px; }
+.navod-text th, .navod-text td { border: 1px solid var(--line); padding: 4px 6px; text-align: left; vertical-align: top; }
+.navod-text .prompt { position: relative; margin: 8px 0; }
+.navod-text .prompt pre { background: var(--panel-2); border: 1px solid var(--line); border-radius: 6px; padding: 10px; overflow-x: auto; white-space: pre-wrap; font-size: 12px; }
+.navod-text .prompt .small-btn { position: absolute; top: 6px; right: 6px; padding: 2px 8px; font-size: 12px; }
