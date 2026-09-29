@@ -467,12 +467,16 @@ const rawDesc = (item) => item.rawBody.replace(META_RE, '').replace(/!\[v\d+\]\(
 // Po odebrání obrázku nesedí počet s čísly v názvech souborů a nový by přepsal existující vN.
 const nextVersion = (files) => Math.max(0, ...files.map((p) => +(p.match(/\/v(\d+)\.[^/]*$/)?.[1] || 0))) + 1;
 
-async function addVersion(item, file, note) {
-  const [path] = await uploadImages([file], itemDir(item), nextVersion(item.files));
-  const meta = { ...item.meta, files: [...item.files, path] };
+// Víc obrázků naráz = víc nových verzí za sebou, jedna úprava issue a jeden komentář.
+async function addVersions(item, files, note) {
+  const paths = await uploadImages(files, itemDir(item), nextVersion(item.files));
+  const meta = { ...item.meta, files: [...item.files, ...paths] };
   await gh(`${REPO}/issues/${item.number}`, { method: 'PATCH', body: { body: buildBody(rawDesc(item), meta) } });
+  const verze = paths.length > 1
+    ? `Nové verze **v${item.files.length + 1}–v${meta.files.length}**`
+    : `Nová verze **v${meta.files.length}**`;
   await gh(`${REPO}/issues/${item.number}/comments`, {
-    method: 'POST', body: { body: `🖼️ Nová verze **v${meta.files.length}**${note ? `\n\n${note}` : ''}` },
+    method: 'POST', body: { body: `🖼️ ${verze}${note ? `\n\n${note}` : ''}` },
   });
 }
 
@@ -913,14 +917,15 @@ function drawDetail(item) {
 
   let versionEl = null;
   if (item.type === 'grafika') {
-    const input = h('input', { type: 'file', accept: 'image/*', hidden: true });
-    const btn = h('button', { class: 'btn', onclick: () => input.click() }, '⬆ Nahrát novou verzi');
+    const input = h('input', { type: 'file', accept: 'image/*', multiple: true, hidden: true });
+    const btn = h('button', { class: 'btn', title: 'Můžeš vybrat víc obrázků naráz (Ctrl / Shift)', onclick: () => input.click() }, '⬆ Nahrát nové verze');
     input.onchange = busy(btn, async () => {
-      const f = input.files[0];
-      if (!f) return;
-      const note = prompt('Co se ve verzi změnilo? (nepovinné)') || '';
-      await addVersion(item, f, note);
-      toast('Nová verze nahrána');
+      const fs = obrazky(input.files);
+      input.value = '';
+      if (!fs.length) return;
+      const note = prompt(fs.length > 1 ? `Co se v ${fs.length} verzích změnilo? (nepovinné)` : 'Co se ve verzi změnilo? (nepovinné)') || '';
+      await addVersions(item, fs, note);
+      toast(fs.length > 1 ? `Nahráno ${fs.length} nových verzí` : 'Nová verze nahrána');
       await refreshItem(item);
       viewer.version = item.files.length - 1;
       redraw();
@@ -971,6 +976,17 @@ function drawDetail(item) {
   loadComments(item, commentsEl);
 }
 
+/** Jen obrázky do 20 MB (větší GitHub API nevezme), o ostatních hláška. */
+function obrazky(list) {
+  const ven = [];
+  for (const f of list) {
+    if (!f.type.startsWith('image/')) continue;
+    if (f.size > 20 * 1024 * 1024) { toast(`${f.name} je větší než 20 MB`, true); continue; }
+    ven.push(f);
+  }
+  return ven;
+}
+
 function editForm(item, redraw) {
   const ed = viewer.edit;
   const title = h('input', { value: ed.title, oninput: (e) => (ed.title = e.target.value) });
@@ -985,14 +1001,18 @@ function editForm(item, redraw) {
   drawPics();
 
   const input = h('input', { type: 'file', accept: 'image/*', multiple: true, hidden: true });
-  input.onchange = () => {
-    for (const f of input.files) {
-      if (!f.type.startsWith('image/')) continue;
-      if (f.size > 20 * 1024 * 1024) { toast(`${f.name} je větší než 20 MB`, true); continue; }
-      ed.added.push(f);
-    }
-    input.value = '';
-    drawPics();
+  const pridej = (list) => { ed.added.push(...obrazky(list)); drawPics(); };
+  input.onchange = () => { pridej(input.files); input.value = ''; };
+  // Obrázky jde přidat i přetažením (klidně víc naráz) nebo vložením přes Ctrl+V, jako u nového příspěvku.
+  const drop = h('div', { class: 'drop' }, pics,
+    h('p', { class: 'small' }, h('b', {}, 'Přetáhni sem víc obrázků naráz'), ', vlož přes Ctrl+V, nebo ',
+      h('button', { class: 'btn', type: 'button', onclick: () => input.click() }, '+ Přidat obrázky'), input));
+  drop.addEventListener('dragover', (e) => { e.preventDefault(); drop.classList.add('over'); });
+  drop.addEventListener('dragleave', () => drop.classList.remove('over'));
+  drop.addEventListener('drop', (e) => { e.preventDefault(); drop.classList.remove('over'); pridej(e.dataTransfer.files); });
+  const vlozeni = (e) => {
+    const imgs = [...e.clipboardData.files].filter((f) => f.type.startsWith('image/'));
+    if (imgs.length) { e.preventDefault(); pridej(imgs); }
   };
 
   const save = h('button', { class: 'btn primary' }, 'Uložit');
@@ -1010,11 +1030,10 @@ function editForm(item, redraw) {
     } finally { save.disabled = false; }
   };
 
-  return h('div', { class: 'edit' },
+  return h('div', { class: 'edit', onpaste: vlozeni },
     h('label', {}, 'Název', title),
     h('label', {}, 'Popis', desc),
-    (item.type === 'napad' || item.type === 'grafika') && h('div', { class: 'edit-pics' }, 'Obrázky', pics,
-      h('div', {}, h('button', { class: 'btn', type: 'button', onclick: () => input.click() }, '+ Přidat obrázek'), input)),
+    (item.type === 'napad' || item.type === 'grafika') && h('div', { class: 'edit-pics' }, 'Obrázky', drop),
     h('div', { class: 'row end' },
       h('button', { class: 'btn', onclick: () => { viewer.edit = null; redraw(); } }, 'Zrušit'),
       save));
