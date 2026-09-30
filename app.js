@@ -1071,31 +1071,32 @@ async function loadComments(item, el) {
 
 // ---------- návod na obrázky ----------
 
-// Celý návod na generování grafiky (docs/art/navod-na-obrazky.md v herním repu). Čte se jako ostatní
-// data přes API a klíčem přihlášeného; ukáže se v okně, prompty jdou kopírovat, celý soubor stáhnout.
-const NAVOD = 'docs/art/navod-na-obrazky.md';
+// Návody na generování grafiky z herního repa: celý návod a prompty zbraní v 5 kvalitách. Čtou se jako
+// ostatní data přes API a klíčem přihlášeného; ukážou se v okně, prompty jdou kopírovat, soubor stáhnout.
+const NAVOD = { soubor: 'docs/art/navod-na-obrazky.md', titul: '📄 Návod na obrázky' };
+const PROMPTY_ZBRANI = { soubor: 'docs/art/prompty-zbrani.md', titul: '⚔ Prompty zbraní' };
 
-async function openNavod() {
+async function openNavod({ soubor, titul } = NAVOD) {
   const dlg = $('#navod-dlg');
-  dlg.replaceChildren(h('p', { class: 'muted' }, 'Načítám návod…'));
+  dlg.replaceChildren(h('p', { class: 'muted' }, 'Načítám…'));
   if (!dlg.open) dlg.showModal();
   try {
-    const res = await gh(`${REPO}/contents/${NAVOD}?ref=${CFG.branch}`, { accept: 'application/vnd.github.raw', raw: true });
+    const res = await gh(`${REPO}/contents/${soubor}?ref=${CFG.branch}`, { accept: 'application/vnd.github.raw', raw: true });
     const text = await res.text();
     const stahnout = h('button', { class: 'btn primary', onclick: () => {
       const url = URL.createObjectURL(new Blob([text], { type: 'text/markdown;charset=utf-8' }));
-      const a = h('a', { href: url, download: 'navod-na-obrazky.md' });
+      const a = h('a', { href: url, download: soubor.split('/').pop() });
       document.body.append(a);
       a.click();
       a.remove();
       setTimeout(() => URL.revokeObjectURL(url), 1000);
     } }, '⬇ Stáhnout .md');
-    const kopirovat = h('button', { class: 'btn', onclick: () => zkopiruj(text, 'Celý návod zkopírovaný') }, 'Kopírovat vše');
+    const kopirovat = h('button', { class: 'btn', onclick: () => zkopiruj(text, 'Celý soubor zkopírovaný') }, 'Kopírovat vše');
     dlg.replaceChildren(
       h('div', { class: 'navod-hlava' },
-        h('h2', {}, '📄 Návod na obrázky'),
+        h('h2', {}, titul),
         h('div', { class: 'row' }, kopirovat, stahnout,
-          h('a', { href: `https://github.com/${CFG.owner}/${CFG.repo}/blob/${CFG.branch}/${NAVOD}`, target: '_blank', rel: 'noopener', class: 'gh-link' }, 'GitHub ↗'),
+          h('a', { href: `https://github.com/${CFG.owner}/${CFG.repo}/blob/${CFG.branch}/${soubor}`, target: '_blank', rel: 'noopener', class: 'gh-link' }, 'GitHub ↗'),
           h('button', { class: 'icon-btn', title: 'Zavřít', onclick: () => dlg.close() }, '✕'))),
       h('div', { class: 'navod-text' }, ...markdown(text)));
   } catch (e) {
@@ -1299,7 +1300,8 @@ function setupUi() {
   $('#cat-filter').onchange = (e) => { state.cat = e.target.value; render(); };
   fillCatSelect($('#cat-filter'), 'vse', true);
   $('#new-item').onclick = () => openCompose(state.tab === 'vse' ? 'napad' : state.tab);
-  $('#navod').onclick = () => openNavod();
+  $('#navod').onclick = () => openNavod(NAVOD);
+  $('#prompty-zbrani').onclick = () => openNavod(PROMPTY_ZBRANI);
   $('#navod-dlg').addEventListener('click', (e) => { if (e.target === e.currentTarget) e.currentTarget.close(); });
   $('#refresh').onclick = () => { imgCache.clear(); loadItems().catch((e) => toast(e.message, true)); };
   $('#me').onclick = () => {
