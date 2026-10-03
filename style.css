@@ -328,6 +328,19 @@ input:focus, select:focus, textarea:focus { outline: 2px solid var(--accent); ou
 .ed-otoceni-tlacitka { display: flex; gap: 4px; }
 .ed-otoceni .icon-btn.on { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); }
 .ed-nahled-obj { width: 48px; height: 48px; }
+.ed-vybrany { display: flex; flex-direction: column; gap: 8px; width: 100%; }
+.ed-nabidka { position: fixed; z-index: 80; min-width: 180px; padding: 4px; background: var(--panel); border: 1px solid var(--line); border-radius: 8px; box-shadow: 0 8px 24px rgba(0,0,0,.5); display: flex; flex-direction: column; }
+.ed-nabidka-hlava { padding: 4px 8px 6px; border-bottom: 1px solid var(--line); margin-bottom: 4px; }
+.ed-nabidka button { display: flex; align-items: center; gap: 8px; background: none; border: 0; color: var(--text); font: inherit; font-size: 13px; text-align: left; padding: 5px 8px; border-radius: 5px; cursor: pointer; }
+.ed-nabidka button:hover { background: var(--panel-2); }
+.ed-nabidka-znak { width: 16px; text-align: center; }
+.ed-vybrany-hlava { display: flex; align-items: center; gap: 8px; }
+.ed-vybrany-hlava .ed-nahled { width: 40px; height: 40px; flex: none; }
+.ed-vybrany .ed-otoceni-tlacitka { flex-wrap: wrap; align-items: center; }
+.ed-procenta { min-width: 42px; text-align: center; }
+.ed-poloha { display: flex; gap: 8px; align-items: center; color: var(--muted); font-size: 12px; }
+.ed-cislo { display: flex; gap: 4px; align-items: center; }
+.ed-cislo input { width: 64px; background: var(--panel-2); border: 1px solid var(--line); color: var(--text); border-radius: 4px; padding: 2px 4px; font: inherit; font-size: 12px; }
 .ed-duch { position: fixed; z-index: 70; pointer-events: none; opacity: .85; transform: translate(-50%, -100%); image-rendering: pixelated; }
 .ed-prazdno p { margin: 6px 0; }
 .ed-platno-obal { flex: 1; min-width: 0; position: relative; overflow: hidden; }

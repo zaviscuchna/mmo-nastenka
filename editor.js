@@ -21,7 +21,10 @@
 // otočení 0, takže se načtou beze změny. Starší verze 1 (mapa pevné velikosti, pole `zem`) se
 // načte taky a posadí se na počátek. Vrstva `objekty` je pole `{ j: jméno z katalogu, x, y }`,
 // kde x a y je **pata** objektu (spodní střed) ve světových pixelech — dlaždice má 32 px. Ukládá
-// se jméno, ne číslo v atlasu, aby projekt přežil, až objektů přibude.
+// se jméno, ne číslo v atlasu, aby projekt přežil, až objektů přibude. Objekt může mít navíc
+// `m` (měřítko, 1 = jak je nakreslený) a `o` (otočení 0–3 po čtvrtotáčce, +4 překlopení zleva
+// doprava) a `v` (ruční pořadí: kladné dopředu, záporné dozadu, jinak se řadí podle paty)
+// — zapisují se, jen když nejsou výchozí.
 
 const ULOZISTE = 'mmo-nastenka-editor';
 const ATLAS_PNG = 'board/editor/dlazdice.png';
@@ -206,7 +209,12 @@ export function vytvorEditor(api) {
   function doProjektu() {
     return {
       verze: 2, nazev: S.nazev, dlazdice: 32, kus: KUS, kusy: S.svet.doJson(),
-      objekty: S.objekty.map((o) => ({ j: o.j, x: Math.round(o.x), y: Math.round(o.y) })),
+      objekty: S.objekty.map((o) => ({
+        j: o.j, x: Math.round(o.x), y: Math.round(o.y),
+        ...(o.m && o.m !== 1 ? { m: o.m } : {}),
+        ...(o.o ? { o: o.o } : {}),
+        ...(o.v ? { v: o.v } : {}),
+      })),
     };
   }
 
@@ -215,7 +223,12 @@ export function vytvorEditor(api) {
     if (!Array.isArray(pole)) return [];
     return pole
       .filter((o) => o && typeof o.j === 'string' && Number.isFinite(o.x) && Number.isFinite(o.y))
-      .map((o) => ({ j: o.j, x: o.x, y: o.y }));
+      .map((o) => ({
+        j: o.j, x: o.x, y: o.y,
+        ...(Number.isFinite(o.m) && o.m > 0 ? { m: Math.min(8, Math.max(0.1, o.m)) } : {}),
+        ...(Number.isInteger(o.o) && o.o > 0 && o.o < 8 ? { o: o.o } : {}),
+        ...(Number.isFinite(o.v) && o.v !== 0 ? { v: o.v } : {}),
+      }));
   }
 
   /** Načte projekt verze 2 i starý s pevnou velikostí (verze 1) — ten se posadí na počátek. */
@@ -294,6 +307,7 @@ export function vytvorEditor(api) {
       S.objekty = krok.objekty;
       S.objOznaceny = -1;
       kresliPaletuObjektu();
+      kresliVybrany();
     }
     protiZasobnik.push(opacny);
     uloz();
@@ -368,6 +382,7 @@ export function vytvorEditor(api) {
   // ---------- objekty ----------
 
   const objPodleJmena = new Map();      // jméno z katalogu → položka (kde je v atlasu)
+  const UCHYT = 10;                     // velikost úchytu na zvětšování (px na obrazovce)
 
   /** Souřadnice ve světě v herních pixelech (dlaždice = 32 px), ne v dlaždicích. */
   function naSvet(e) {
@@ -378,15 +393,30 @@ export function vytvorEditor(api) {
     };
   }
 
+  const MERITKA = [0.25, 0.33, 0.5, 0.67, 0.75, 1, 1.25, 1.5, 2, 2.5, 3, 4];
+
+  /** Rozměr objektu na mapě po měřítku a otočení (po čtvrtotáčce si strany vymění místo). */
+  function rozmerObjektu(k, o) {
+    const m = o.m || 1;
+    return (o.o || 0) % 2 ? { s: k.v * m, v: k.s * m } : { s: k.s * m, v: k.v * m };
+  }
+
   /** Kusy cest sedí na mřížku vždycky, ostatní jen se Shiftem. Pata = spodní střed políčka. */
   function pripni(bod, polozka, shift) {
     if (!polozka?.naMrizku && !shift) return bod;
     return { x: Math.floor(bod.x / 32) * 32 + 16, y: Math.floor(bod.y / 32) * 32 + 32 };
   }
 
-  /** Pořadí kreslení: co je níž (větší y), je blíž ke kameře a kreslí se přes to za ním. */
+  /**
+   * Pořadí kreslení: co je níž (větší y), je blíž ke kameře a kreslí se přes to za ním. Ručně
+   * poslaný dopředu nebo dozadu (`v`) to přebije — na to je nabídka pod pravým tlačítkem.
+   */
   function poradiObjektu() {
-    return S.objekty.map((_, i) => i).sort((a, b) => S.objekty[a].y - S.objekty[b].y);
+    return S.objekty.map((_, i) => i).sort((a, b) => {
+      const x = S.objekty[a];
+      const y = S.objekty[b];
+      return (x.v || 0) - (y.v || 0) || x.y - y.y || a - b;
+    });
   }
 
   /** Index objektu pod bodem; bere ten nejvrchnější. -1 = nic tam není. */
@@ -396,7 +426,8 @@ export function vytvorEditor(api) {
       const o = S.objekty[poradi[n]];
       const k = objPodleJmena.get(o.j);
       if (!k) continue;
-      if (bod.x >= o.x - k.s / 2 && bod.x <= o.x + k.s / 2 && bod.y <= o.y && bod.y >= o.y - k.v) {
+      const r = rozmerObjektu(k, o);
+      if (bod.x >= o.x - r.s / 2 && bod.x <= o.x + r.s / 2 && bod.y <= o.y && bod.y >= o.y - r.v) {
         return poradi[n];
       }
     }
@@ -413,6 +444,75 @@ export function vytvorEditor(api) {
     return S.objOznaceny;
   }
 
+  /** Změní vybraný objekt bez zápisu do historie (na to je zmenaObjektu) a bez překreslení panelu. */
+  function zmenObjekt(zmena) {
+    const o = S.objekty[S.objOznaceny];
+    if (!o) return false;
+    zmena(o);
+    if (o.m === 1) delete o.m;              // výchozí hodnoty se neukládají
+    if (!o.o) delete o.o;
+    if (!o.v) delete o.v;
+    uloz();
+    kresli();
+    stav();
+    return true;
+  }
+
+  /** Jedna úprava vybraného objektu i se zápisem do historie a překreslením panelu. */
+  function upravVybrany(zmena) {
+    if (!S.objekty[S.objOznaceny]) return false;
+    zmenaObjektu();
+    zmenObjekt(zmena);
+    kresliVybrany();
+    return true;
+  }
+
+  function otocObjekt(smer) {
+    upravVybrany((o) => {
+      const t = o.o || 0;
+      o.o = (t & 4) + ((t % 4) + smer + 4) % 4;
+    });
+  }
+
+  function preklopObjekt() {
+    upravVybrany((o) => { o.o = (o.o || 0) >= 4 ? (o.o || 0) - 4 : (o.o || 0) + 4; });
+  }
+
+  function zmenMeritko(smer) {
+    const o = S.objekty[S.objOznaceny];
+    if (!o) return;
+    const ted = o.m || 1;
+    const i = MERITKA.findIndex((m) => m > ted + 1e-6);
+    const dalsi = smer > 0
+      ? MERITKA[i < 0 ? MERITKA.length - 1 : i]
+      : [...MERITKA].reverse().find((m) => m < ted - 1e-6) ?? MERITKA[0];
+    upravVybrany((x) => { x.m = dalsi; });
+  }
+
+  function doPopredi() {
+    upravVybrany((o) => { o.v = Math.max(0, ...S.objekty.map((x) => x.v || 0)) + 1; });
+  }
+
+  function doPozadi() {
+    upravVybrany((o) => { o.v = Math.min(0, ...S.objekty.map((x) => x.v || 0)) - 1; });
+  }
+
+  function podlePaty() {
+    upravVybrany((o) => { delete o.v; });
+  }
+
+  function duplikujVybrany() {
+    const o = S.objekty[S.objOznaceny];
+    if (!o) return;
+    zmenaObjektu();
+    S.objekty.push({ ...o, x: o.x + 16, y: o.y + 16 });
+    S.objOznaceny = S.objekty.length - 1;
+    uloz();
+    kresli();
+    kresliVybrany();
+    stav();
+  }
+
   function smazOznaceny() {
     if (S.objOznaceny < 0) return;
     zmenaObjektu();
@@ -420,6 +520,7 @@ export function vytvorEditor(api) {
     S.objOznaceny = -1;
     uloz();
     kresli();
+    kresliVybrany();
     stav();
   }
 
@@ -589,19 +690,38 @@ export function vytvorEditor(api) {
       const o = S.objekty[i];
       const k = objPodleJmena.get(o.j);
       if (!k) continue;
-      const sirka = Math.max(1, Math.round(k.s * m));
-      const vyska = Math.max(1, Math.round(k.v * m));
+      const r = rozmerObjektu(k, o);
+      const sirka = Math.max(1, Math.round(r.s * m));
+      const vyska = Math.max(1, Math.round(r.v * m));
       const dx = Math.round(S.posunX + o.x * m - sirka / 2);
       const dy = Math.round(S.posunY + o.y * m - vyska);
       if (dx > platno.width || dy > platno.height || dx + sirka < 0 || dy + vyska < 0) continue;
-      ctx.drawImage(S.objAtlas, k.x, k.y, k.s, k.v, dx, dy, sirka, vyska);
+      kresliObjektDo(ctx, k, o, dx, dy, sirka, vyska);
       if (i === S.objOznaceny) {
         ctx.strokeStyle = '#f2b84b';
         ctx.setLineDash([4, 3]);
         ctx.strokeRect(dx + 0.5, dy + 0.5, sirka - 1, vyska - 1);
         ctx.setLineDash([]);
+        // Úchyt na zvětšování: čtvereček v pravém horním rohu, tahem nahoru objekt roste.
+        ctx.setLineDash([]);
+        ctx.fillStyle = '#f2b84b';
+        ctx.fillRect(dx + sirka - UCHYT / 2, dy - UCHYT / 2, UCHYT, UCHYT);
       }
     }
+  }
+
+  /** Nakreslí objekt do daného plátna i s otočením a překlopením (měřítko je v šířce a výšce). */
+  function kresliObjektDo(g, k, o, dx, dy, sirka, vyska) {
+    const t = o.o || 0;
+    if (!t) { g.drawImage(S.objAtlas, k.x, k.y, k.s, k.v, dx, dy, sirka, vyska); return; }
+    g.save();
+    g.translate(dx + sirka / 2, dy + vyska / 2);
+    if (t >= 4) g.scale(-1, 1);
+    g.rotate((t % 4) * Math.PI / 2);
+    const w = t % 2 ? vyska : sirka;
+    const v = t % 2 ? sirka : vyska;
+    g.drawImage(S.objAtlas, k.x, k.y, k.s, k.v, -w / 2, -v / 2, w, v);
+    g.restore();
   }
 
   function prizpusob() {
@@ -756,12 +876,59 @@ export function vytvorEditor(api) {
       if (nadMapou) {
         polozObjekt(naSvet(ev), ev.shiftKey);
         kresli();
+        kresliVybrany();
         stav();
       }
     };
     posun(e);
     addEventListener('pointermove', posun);
     addEventListener('pointerup', konec, { once: true });
+  }
+
+  const panelVybraneho = h('div', { class: 'ed-vybrany' });
+
+  /** Co se dá s položeným objektem dělat: velikost, otočení, překlopení, kopie, poloha, smazání. */
+  function kresliVybrany() {
+    const o = S.objekty[S.objOznaceny];
+    const k = o && objPodleJmena.get(o.j);
+    if (!o || !k) {
+      panelVybraneho.replaceChildren(h('span', { class: 'muted small' },
+        'Nic není vybrané. Klikni na objekt na mapě a půjde zvětšit, otočit nebo posunout.'));
+      return;
+    }
+    const m = o.m || 1;
+    const cislo = (klic, popis) => h('label', { class: 'ed-cislo' }, popis,
+      h('input', {
+        type: 'number', step: '1', value: String(Math.round(o[klic])),
+        onfocus: zmenaObjektu,
+        oninput: (e) => zmenObjekt((x) => { x[klic] = Number(e.target.value) || 0; }),
+      }));
+    panelVybraneho.replaceChildren(
+      h('div', { class: 'ed-vybrany-hlava' }, nahledObjektu(k, 40),
+        h('span', { class: 'small' }, `${k.jmeno} · ${Math.round(k.s * m)} × ${Math.round(k.v * m)} px`)),
+      h('div', { class: 'ed-otoceni-tlacitka' },
+        h('button', { class: 'icon-btn', title: 'Zmenšit ([)', onclick: () => zmenMeritko(-1) }, '−'),
+        h('span', { class: 'muted small ed-procenta' }, `${Math.round(m * 100)} %`),
+        h('button', { class: 'icon-btn', title: 'Zvětšit (])', onclick: () => zmenMeritko(1) }, '+'),
+        h('button', { class: 'icon-btn', title: 'Otočit doprava (O)', onclick: () => otocObjekt(1) }, '↻'),
+        h('button', { class: 'icon-btn', title: 'Otočit doleva (Shift+O)', onclick: () => otocObjekt(-1) }, '↺'),
+        h('button', {
+          class: `icon-btn${(o.o || 0) >= 4 ? ' on' : ''}`, title: 'Překlopit zleva doprava (X)',
+          onclick: preklopObjekt,
+        }, '⇄'),
+        h('button', { class: 'icon-btn', title: 'Udělat kopii (Ctrl+D)', onclick: duplikujVybrany }, '⧉'),
+        h('button', { class: 'icon-btn', title: 'Smazat (Delete)', onclick: smazOznaceny }, '🗑')),
+      h('label', { class: 'ed-sila', title: 'Velikost v procentech kresby' }, 'velikost',
+        h('input', {
+          type: 'range', min: '10', max: '400', step: '5', value: String(Math.round(m * 100)),
+          onpointerdown: zmenaObjektu,      // jeden tah = jeden krok zpět
+          oninput: (e) => {
+            zmenObjekt((x) => { x.m = Number(e.target.value) / 100; });
+            panelVybraneho.querySelector('.ed-procenta').textContent = `${e.target.value} %`;
+          },
+        })),
+      h('div', { class: 'ed-poloha' }, cislo('x', 'x'), cislo('y', 'y'),
+        h('span', { class: 'muted small' }, 'px od počátku')));
   }
 
   function kresliPaletuObjektu() {
@@ -784,6 +951,42 @@ export function vytvorEditor(api) {
       ? `${S.objVybrany.jmeno} · ${S.objVybrany.s} × ${S.objVybrany.v} px${S.objVybrany.naMrizku ? ' · sedá na mřížku' : ''}`
       : 'Vyber objekt a přetáhni ho na mapu');
   }
+
+  // ---------- nabídka pod pravým tlačítkem ----------
+
+  const nabidka = h('div', { class: 'ed-nabidka', hidden: true });
+
+  function zavriNabidku() {
+    if (!nabidka.hidden) nabidka.hidden = true;
+  }
+
+  function otevriNabidku(e, i) {
+    S.objOznaceny = i;
+    kresli();
+    kresliVybrany();
+    stav();
+    const o = S.objekty[i];
+    const k = objPodleJmena.get(o.j);
+    const radek = (znak, popis, co) => h('button', {
+      onclick: () => { zavriNabidku(); co(); },
+    }, h('span', { class: 'ed-nabidka-znak' }, znak), popis);
+    nabidka.replaceChildren(
+      h('div', { class: 'ed-nabidka-hlava muted small' }, k?.jmeno || o.j),
+      radek('⬆', 'Do popředí', doPopredi),
+      radek('⬇', 'Do pozadí', doPozadi),
+      radek('↕', 'Řadit podle paty', podlePaty),
+      radek('↻', 'Otočit doprava', () => otocObjekt(1)),
+      radek('⇄', 'Překlopit', preklopObjekt),
+      radek('⧉', 'Udělat kopii', duplikujVybrany),
+      radek('🗑', 'Smazat', smazOznaceny));
+    nabidka.hidden = false;
+    nabidka.style.left = `${Math.max(4, Math.min(e.clientX, innerWidth - nabidka.offsetWidth - 8))}px`;
+    nabidka.style.top = `${Math.max(4, Math.min(e.clientY, innerHeight - nabidka.offsetHeight - 8))}px`;
+  }
+
+  addEventListener('pointerdown', (e) => {
+    if (!nabidka.hidden && !nabidka.contains(e.target)) zavriNabidku();
+  }, true);
 
   // ---------- lišta nástrojů ----------
 
@@ -862,10 +1065,12 @@ export function vytvorEditor(api) {
   let posouvaSe = null;
   let mezernik = false;
   let tazenyObjekt = null;      // { i, dx, dy, nove, pohnuto } — objekt tažený po mapě
+  let pravyKlik = null;         // kde se stisklo pravé tlačítko (klik × posun mapy)
 
   /** Klik nástrojem Objekty: na objektu ho chytne, jinde položí vybraný z palety. */
   function zacniObjekt(e) {
     if (!S.objKatalog) { nactiObjekty(); return; }
+    if (chytUchyt(e)) return;
     const bod = naSvet(e);
     let i = objektNa(bod);
     let nove = false;
@@ -878,12 +1083,37 @@ export function vytvorEditor(api) {
     const o = S.objekty[i];
     tazenyObjekt = { i, dx: o.x - bod.x, dy: o.y - bod.y, nove, pohnuto: false };
     kresli();
+    kresliVybrany();
     stav();
+  }
+
+  /** Žlutý čtvereček v pravém horním rohu vybraného objektu: tahem se mění velikost. */
+  function chytUchyt(e) {
+    const o = S.objekty[S.objOznaceny];
+    const k = o && objPodleJmena.get(o.j);
+    if (!k) return false;
+    const r = rozmerObjektu(k, o);
+    const kam = platno.getBoundingClientRect();
+    const hx = kam.left + S.posunX + (o.x + r.s / 2) * S.zoom;
+    const hy = kam.top + S.posunY + (o.y - r.v) * S.zoom;
+    if (Math.abs(e.clientX - hx) > UCHYT || Math.abs(e.clientY - hy) > UCHYT) return false;
+    zmenaObjektu();
+    tazenyObjekt = { i: S.objOznaceny, meritko: true, pohnuto: true, nove: false };
+    return true;
   }
 
   function tahniObjekt(e) {
     const o = S.objekty[tazenyObjekt.i];
     if (!o) { tazenyObjekt = null; return; }
+    if (tazenyObjekt.meritko) {
+      const k = objPodleJmena.get(o.j);
+      const zaklad = (o.o || 0) % 2 ? k.s : k.v;      // po čtvrtotáčce měří výšku původní šířka
+      const nove = (o.y - naSvet(e).y) / Math.max(1, zaklad);
+      o.m = Math.min(8, Math.max(0.1, Math.round(nove * 100) / 100));
+      kresli();
+      kresliVybrany();
+      return;
+    }
     if (!tazenyObjekt.pohnuto) {
       if (!tazenyObjekt.nove) zmenaObjektu();     // posun se dá vzít zpět, položení už zapsané je
       tazenyObjekt.pohnuto = true;
@@ -904,6 +1134,8 @@ export function vytvorEditor(api) {
     // Posun: pravé i prostřední tlačítko, mezerník nebo nástroj ruka. Táhne se kamkoli, svět nemá
     // okraje. Mazání zůstává na gumě (E), ať se posun a mazání nepletou.
     if (e.button === 2 || e.button === 1 || mezernik || S.nastroj === 'ruka') {
+      // Pravým se posouvá mapa, ale když se jím jen klikne na objekt, otevře se nabídka.
+      pravyKlik = e.button === 2 ? { x: e.clientX, y: e.clientY } : null;
       posouvaSe = { x: e.clientX - S.posunX, y: e.clientY - S.posunY };
       return;
     }
@@ -960,7 +1192,16 @@ export function vytvorEditor(api) {
       stav();
       return;
     }
-    if (posouvaSe) { posouvaSe = null; return; }
+    if (posouvaSe) {
+      posouvaSe = null;
+      const klik = pravyKlik && Math.abs(e.clientX - pravyKlik.x) < 5 && Math.abs(e.clientY - pravyKlik.y) < 5;
+      pravyKlik = null;
+      if (klik && S.objKatalog) {
+        const i = objektNa(naSvet(e));
+        if (i >= 0) otevriNabidku(e, i);
+      }
+      return;
+    }
     if (S.obdelnikOd) {
       const o = S.obdelnikOd;
       const k = o.ted || o;
@@ -992,10 +1233,17 @@ export function vytvorEditor(api) {
     if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'z') { e.preventDefault(); return vrat(S.historie, S.budoucnost); }
     if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'y') { e.preventDefault(); return vrat(S.budoucnost, S.historie); }
     if (e.key.toLowerCase() === 'f') { e.preventDefault(); return celySvet(); }
-    if (e.key.toLowerCase() === 'o') { e.preventDefault(); return otoc(e.shiftKey ? -1 : 1); }
-    if (e.key.toLowerCase() === 'x') { e.preventDefault(); return preklop(); }
+    // Když je vybraný objekt na mapě, otáčí se on; jinak dlaždice, co se zrovna pokládá.
+    const naObjekt = S.objOznaceny >= 0;
+    if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'd') { e.preventDefault(); return duplikujVybrany(); }
+    if (e.key.toLowerCase() === 'o') {
+      e.preventDefault();
+      return naObjekt ? otocObjekt(e.shiftKey ? -1 : 1) : otoc(e.shiftKey ? -1 : 1);
+    }
+    if (e.key.toLowerCase() === 'x') { e.preventDefault(); return naObjekt ? preklopObjekt() : preklop(); }
+    if (e.key === '[' || e.key === ']') { e.preventDefault(); return zmenMeritko(e.key === ']' ? 1 : -1); }
     if (e.key === 'Delete' || e.key === 'Backspace') { e.preventDefault(); return smazOznaceny(); }
-    if (e.key === 'Escape') { S.objOznaceny = -1; return kresli(); }
+    if (e.key === 'Escape') { zavriNabidku(); S.objOznaceny = -1; kresliVybrany(); return kresli(); }
     const n = NASTROJE.find((x) => x.klavesa === e.key.toLowerCase());
     if (n) { S.nastroj = n.id; kresliListu(); }
   }
@@ -1042,8 +1290,9 @@ export function vytvorEditor(api) {
       const o = S.objekty[i];
       const k = objPodleJmena.get(o.j);
       if (!k) continue;
-      g.drawImage(S.objAtlas, k.x, k.y, k.s, k.v,
-        Math.round(o.x - m.x0 * 32 - k.s / 2), Math.round(o.y - m.y0 * 32 - k.v), k.s, k.v);
+      const r = rozmerObjektu(k, o);
+      kresliObjektDo(g, k, o, Math.round(o.x - m.x0 * 32 - r.s / 2), Math.round(o.y - m.y0 * 32 - r.v),
+        Math.round(r.s), Math.round(r.v));
     }
     const blob = await new Promise((hotovo) => c.toBlob(hotovo, 'image/png'));
     stahni(`${nazevSouboru()}.png`, blob);
@@ -1095,10 +1344,9 @@ export function vytvorEditor(api) {
   // ---------- kostra ----------
 
   const panelObjektu = h('div', {}, objZalozky, objMrizka, objPopis,
-    h('div', { class: 'ed-otoceni' },
-      h('button', { class: 'icon-btn', title: 'Smazat vybraný objekt (Delete)', onclick: smazOznaceny }, '🗑'),
-      h('span', { class: 'muted small' }, 'Přetáhni objekt na mapu. Na mapě ho chytíš a posuneš, '
-        + 'Delete ho smaže. Se Shiftem sedne na mřížku.')));
+    h('div', { class: 'ed-otoceni' }, panelVybraneho),
+    h('p', { class: 'muted small' }, 'Přetáhni objekt z palety na mapu. Na mapě ho chytíš a posuneš, '
+      + 'za žlutý čtvereček v rohu zvětšíš, Delete ho smaže. Se Shiftem sedne na mřížku.'));
 
   const paleta = h('aside', { class: 'ed-bok' },
     h('div', { class: 'ed-hlavni-zalozky' },
@@ -1122,7 +1370,7 @@ export function vytvorEditor(api) {
     stav();
   }
 
-  const koren = h('main', { class: 'editor', id: 'editor', hidden: true },
+  const koren = h('main', { class: 'editor', id: 'editor', hidden: true }, nabidka,
     h('div', { class: 'ed-lista' },
       h('button', { class: 'btn', onclick: novySvet }, '✦ Nový svět'),
       h('button', { class: 'btn', onclick: prejmenuj, title: 'Přejmenovat svět' }, '✎ Název'),
@@ -1174,6 +1422,7 @@ export function vytvorEditor(api) {
       objPodleJmena.clear();
       for (const k of json.polozky) objPodleJmena.set(k.soubor, k);
       kresliPaletuObjektu();
+      kresliVybrany();
       kresli();
       stav();
     } catch (e) {
@@ -1208,6 +1457,6 @@ export function vytvorEditor(api) {
       if (!S.atlas) nactiAtlas().then(() => { nasted(); kresli(); });
       else kresli();
     },
-    skryj() { koren.hidden = true; },
+    skryj() { zavriNabidku(); koren.hidden = true; },
   };
 }
