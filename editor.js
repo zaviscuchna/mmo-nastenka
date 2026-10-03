@@ -1598,26 +1598,116 @@ export function vytvorEditor(api) {
     toast(`Vyvezeno ${m.sirka} × ${m.vyska} dlaždic, levý horní roh je ${m.x0},${m.y0}`);
   }
 
+  /** Nahradí rozkreslený svět načteným projektem (ze souboru i z repa). */
+  function otevriProjekt(data) {
+    const nacteny = zProjektu(data);
+    if (!nacteny) throw new Error('tohle není projekt editoru');
+    S.nazev = nacteny.nazev;
+    S.svet = nacteny.svet;
+    S.objekty = nacteny.objekty || [];
+    S.oznacene = [];
+    if (S.objekty.length) nactiObjekty();
+    nahledy.clear();
+    S.historie.length = 0; S.budoucnost.length = 0;
+    uloz(); nasted(); kresli(); stav();
+  }
+
   function otevriSoubor() {
     const vstup = h('input', { type: 'file', accept: '.json,application/json' });
     vstup.onchange = async () => {
       const f = vstup.files?.[0];
       if (!f) return;
       try {
-        const nacteny = zProjektu(JSON.parse(await f.text()));
-        if (!nacteny) throw new Error('tohle není projekt editoru');
-        S.nazev = nacteny.nazev;
-        S.svet = nacteny.svet;
-        S.objekty = nacteny.objekty || [];
-        S.oznacene = [];
-        if (S.objekty.length) nactiObjekty();
-        nahledy.clear();
-        S.historie.length = 0; S.budoucnost.length = 0;
-        uloz(); nasted(); kresli(); stav();
+        otevriProjekt(JSON.parse(await f.text()));
+        S.zRepa = null;
         toast(`Otevřeno: ${S.nazev}`);
       } catch (e) { toast(`Nešlo otevřít: ${e.message}`, true); }
     };
     vstup.click();
+  }
+
+  // ---------- projekty v repu ----------
+  // Leží v board/editor/projekty/<jméno>.json. Rozkreslená práce je jen v tomhle prohlížeči
+  // (localStorage), tak se před otevřením jiného projektu ptá, když od posledního otevření nebo
+  // uložení do repa něco přibylo. S.zRepa = { jmeno, otisk } — otisk je projekt, jak je v repu.
+
+  const PROJEKTY = 'board/editor/projekty';
+  const cestaProjektu = (jmeno) => `${PROJEKTY}/${jmeno}.json`;
+  const neulozeno = () => (S.svet.kusy.size > 0 || S.objekty.length > 0)
+    && JSON.stringify(doProjektu()) !== S.zRepa?.otisk;
+
+  function doBase64(text) {
+    const bajty = new TextEncoder().encode(text);
+    let bin = '';
+    for (let i = 0; i < bajty.length; i += 0x8000) bin += String.fromCharCode(...bajty.subarray(i, i + 0x8000));
+    return btoa(bin);
+  }
+
+  /** Seznam projektů z repa jako nabídka pod tlačítkem. */
+  async function otevriZRepa(e) {
+    const kde = e.currentTarget.getBoundingClientRect();
+    let soubory;
+    try {
+      soubory = (await gh(`${REPO}/contents/${encPath(PROJEKTY)}?ref=${CFG.branch}`))
+        .filter((f) => f.type === 'file' && f.name.endsWith('.json'));
+    } catch (err) {
+      if (err.status !== 404) return toast(`Seznam projektů se nenačetl: ${err.message}`, true);
+      soubory = [];
+    }
+    if (!soubory.length) return toast('V repu zatím žádné projekty nejsou — ulož první tlačítkem 📤', true);
+    nabidka.replaceChildren(
+      h('div', { class: 'ed-nabidka-hlava muted small' }, 'Projekty v repu'),
+      ...soubory.map((f) => {
+        const jmeno = f.name.replace(/\.json$/, '');
+        return h('button', {
+          title: `${PROJEKTY}/${f.name} · ${Math.max(1, Math.round(f.size / 1024))} kB`,
+          onclick: () => { zavriNabidku(); otevriZRepaSoubor(jmeno); },
+        }, h('span', { class: 'ed-nabidka-znak' }, '🗺'), jmeno);
+      }));
+    nabidka.hidden = false;
+    nabidka.style.left = `${Math.max(4, Math.min(kde.left, innerWidth - nabidka.offsetWidth - 8))}px`;
+    nabidka.style.top = `${kde.bottom + 4}px`;
+  }
+
+  async function otevriZRepaSoubor(jmeno) {
+    if (neulozeno() && !confirm(`Otevřít „${jmeno}"? Co máš teď rozkreslené („${S.nazev}"), se přepíše. `
+      + 'Jestli to chceš mít, ulož to napřed do repa nebo stáhni.')) return;
+    try {
+      const data = await gh(`${REPO}/contents/${encPath(cestaProjektu(jmeno))}?ref=${CFG.branch}`,
+        { accept: 'application/vnd.github.raw', raw: true }).then((r) => r.json());
+      otevriProjekt(data);
+      S.zRepa = { jmeno, otisk: JSON.stringify(doProjektu()) };
+      celySvet();
+      toast(`Otevřeno z repa: ${S.nazev}`);
+    } catch (err) { toast(`Nešlo otevřít: ${err.message}`, true); }
+  }
+
+  /** Uloží svět do repa jako board/editor/projekty/<jméno>.json; existující přepíše (se sha). */
+  async function ulozDoRepa() {
+    if (!S.svet.kusy.size && !S.objekty.length) return toast('Svět je prázdný, není co ukládat', true);
+    const zadano = prompt(`Pod jakým jménem uložit do repa? (${PROJEKTY}/…)`, S.zRepa?.jmeno || nazevSouboru());
+    if (zadano === null) return;
+    const jmeno = zadano.toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '')
+      .replace(/\.json$/, '').replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
+    if (!jmeno) return toast('Takové jméno nejde', true);
+    const cesta = cestaProjektu(jmeno);
+    try {
+      let sha;
+      try {
+        sha = (await gh(`${REPO}/contents/${encPath(cesta)}?ref=${CFG.branch}`)).sha;
+      } catch (err) { if (err.status !== 404) throw err; }
+      if (sha && jmeno !== S.zRepa?.jmeno && !confirm(`Projekt „${jmeno}" už v repu je. Přepsat ho?`)) return;
+      const text = JSON.stringify(doProjektu());
+      await gh(`${REPO}/contents/${encPath(cesta)}`, {
+        method: 'PUT',
+        body: {
+          message: `Editor map: ${sha ? 'úprava projektu' : 'nový projekt'} „${S.nazev}" (${jmeno}.json)`,
+          content: doBase64(text), branch: CFG.branch, sha,
+        },
+      });
+      S.zRepa = { jmeno, otisk: text };
+      toast(`Uloženo do repa: ${cesta}`);
+    } catch (err) { toast(`Uložení do repa selhalo: ${err.message}`, true); }
   }
 
   function novySvet() {
@@ -1681,6 +1771,8 @@ export function vytvorEditor(api) {
       h('button', { class: 'btn', onclick: novySvet }, '✦ Nový svět'),
       h('button', { class: 'btn', onclick: prejmenuj, title: 'Přejmenovat svět' }, '✎ Název'),
       h('button', { class: 'btn', onclick: otevriSoubor }, '📂 Otevřít'),
+      h('button', { class: 'btn', onclick: otevriZRepa, title: `Projekty uložené v herním repu (${PROJEKTY})` }, '📥 Otevřít z repa'),
+      h('button', { class: 'btn', onclick: ulozDoRepa, title: `Uloží svět do herního repa jako ${PROJEKTY}/<jméno>.json` }, '📤 Uložit do repa'),
       h('button', { class: 'btn', onclick: stahniProjekt, title: 'Projekt .json — tohle pošli Claudovi do repa, tím se dá svět zase otevřít' }, '💾 Stáhnout projekt'),
       h('button', { class: 'btn', onclick: stahniObrazek, title: 'Nakreslená část světa jako jeden obrázek' }, '🖼 Stáhnout PNG'),
       listaNastroju),
