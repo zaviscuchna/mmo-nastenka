@@ -12,8 +12,11 @@
 //
 // Formát projektu (stahuje se i nahrává):
 //   { verze:2, nazev, dlazdice:32, kus:32, kusy: { "cx,cy": [hodnota, kolikrát, …] }, objekty:[] }
-// -1 = prázdno. Starší verze 1 (mapa pevné velikosti, pole `zem`) se načte taky a posadí se
-// na počátek. Vrstva `objekty` je zatím vždy prázdná, čeká na stromy, budovy a kameny.
+// Hodnota = otočení × 4096 + číslo dlaždice v atlasu; -1 = prázdno. Otočení 0–3 je čtvrtotáčka
+// doprava, +4 k tomu překlopení zleva doprava. Světy uložené dřív mají jen čísla dlaždic, což je
+// otočení 0, takže se načtou beze změny. Starší verze 1 (mapa pevné velikosti, pole `zem`) se
+// načte taky a posadí se na počátek. Vrstva `objekty` je zatím vždy prázdná, čeká na stromy,
+// budovy a kameny.
 
 const ULOZISTE = 'mmo-nastenka-editor';
 const ATLAS_PNG = 'board/editor/dlazdice.png';
@@ -24,6 +27,16 @@ const NAHLEDY_STROP = 4096;     // kolik náhledů kusů se drží v paměti (je
 const KUS = 32;                 // dlaždic na stranu jednoho kusu světa
 const VYPLN_STROP = 40000;      // výplň v nekonečnu musí mít strop, jinak by běžela donekonečna
 const PRAZDNO = -1;
+const OTOCENI = 4096;           // o kolik se v hodnotě dlaždice posune otočení (atlas má 192 dlaždic)
+
+const kod = (i, o) => (o ? o * OTOCENI + i : i);
+const cisloDlazdice = (v) => v % OTOCENI;
+const otoceniDlazdice = (v) => Math.floor(v / OTOCENI);
+/** „↻90°", „⇄ ↻180°" — jak se otočení píše vedle jména dlaždice. */
+function popisOtoceni(o) {
+  const uhel = (o % 4) * 90;
+  return `${o >= 4 ? '⇄' : ''}${uhel ? `↻${uhel}°` : ''}` || '';
+}
 
 const NAZVY_TYPU = {
   trava: 'Tráva', zem: 'Zem a cesty', kamen: 'Kámen', voda: 'Voda a bažina',
@@ -154,6 +167,7 @@ export function vytvorEditor(api) {
     katalog: null,        // { dlazdice, sloupcu, polozky }
     typ: 'trava',         // otevřená záložka palety
     vybrana: null,        // index dlaždice v atlasu
+    otoceni: 0,           // 0–3 čtvrtotáčky doprava, +4 překlopeno zleva doprava
     nastroj: 'stetec',
     sila: 1,              // šířka štětce v dlaždicích
     mrizka: true,
@@ -205,6 +219,9 @@ export function vytvorEditor(api) {
   }
 
   // ---------- historie ----------
+
+  /** Hodnota, která se teď pokládá: vybraná dlaždice i s nastaveným otočením. */
+  function polozena() { return kod(S.vybrana, S.otoceni); }
 
   function zacniTah() { S.tah = new Map(); }
 
@@ -348,7 +365,8 @@ export function vytvorEditor(api) {
       for (let i = 0; i < kus.length; i++) {
         const v = kus[i];
         if (v < 0) continue;                 // prázdno zůstane průhledné
-        obraz.data.set(barvy.subarray(v * 4, v * 4 + 4), i * 4);
+        const b = cisloDlazdice(v) * 4;    // otočení barvu nemění
+        obraz.data.set(barvy.subarray(b, b + 4), i * 4);
       }
       g.putImageData(obraz, 0, 0);
     }
@@ -359,12 +377,23 @@ export function vytvorEditor(api) {
 
   function zapomenNahled(x, y) { nahledy.delete(`${Math.floor(x / KUS)},${Math.floor(y / KUS)}`); }
 
-  function kresliDlazdici(i, dx, dy, d) {
+  /** Nakreslí hodnotu ze světa (dlaždice i s otočením) do zadaného plátna. */
+  function kresliDlazdiciDo(g, v, dx, dy, d) {
     const k = S.katalog;
+    const i = cisloDlazdice(v);
+    const o = otoceniDlazdice(v);
     const sx = (i % k.sloupcu) * k.dlazdice;
     const sy = Math.floor(i / k.sloupcu) * k.dlazdice;
-    ctx.drawImage(S.atlas, sx, sy, k.dlazdice, k.dlazdice, dx, dy, d, d);
+    if (!o) { g.drawImage(S.atlas, sx, sy, k.dlazdice, k.dlazdice, dx, dy, d, d); return; }
+    g.save();
+    g.translate(dx + d / 2, dy + d / 2);
+    if (o >= 4) g.scale(-1, 1);             // překlopení, až po něm se otáčí
+    g.rotate((o % 4) * Math.PI / 2);
+    g.drawImage(S.atlas, sx, sy, k.dlazdice, k.dlazdice, -d / 2, -d / 2, d, d);
+    g.restore();
   }
+
+  const kresliDlazdici = (v, dx, dy, d) => kresliDlazdiciDo(ctx, v, dx, dy, d);
 
   function kresli() {
     if (!platno.width) return;
@@ -471,14 +500,37 @@ export function vytvorEditor(api) {
   const paletaZalozky = h('div', { class: 'ed-zalozky' });
   const paletaMrizka = h('div', { class: 'ed-paleta' });
   const popisVybrane = h('div', { class: 'ed-vybrana muted small' }, 'Vyber dlaždici');
+  const otoceniRada = h('div', { class: 'ed-otoceni' });
 
-  function nahledDlazdice(i, velikost = 32) {
-    const k = S.katalog;
+  /** Otočení platí pro další pokládání, ne pro už nakreslené — jako štětec, ne jako guma. */
+  function otoc(smer) {
+    S.otoceni = (S.otoceni & 4) + ((S.otoceni % 4) + smer + 4) % 4;
+    kresliOtoceni(); stav();
+  }
+
+  function preklop() {
+    S.otoceni = S.otoceni >= 4 ? S.otoceni - 4 : S.otoceni + 4;
+    kresliOtoceni(); stav();
+  }
+
+  function kresliOtoceni() {
+    const mam = S.katalog?.polozky.some((p) => p.i === S.vybrana);
+    otoceniRada.replaceChildren(
+      mam ? nahledDlazdice(S.vybrana, 48, S.otoceni) : h('span', { class: 'muted small' }, '—'),
+      h('div', { class: 'ed-otoceni-tlacitka' },
+        h('button', { class: 'icon-btn', title: 'Otočit doprava (O)', onclick: () => otoc(1) }, '↻'),
+        h('button', { class: 'icon-btn', title: 'Otočit doleva (Shift+O)', onclick: () => otoc(-1) }, '↺'),
+        h('button', {
+          class: `icon-btn${S.otoceni >= 4 ? ' on' : ''}`, title: 'Překlopit zleva doprava (X)', onclick: preklop,
+        }, '⇄')),
+      h('span', { class: 'muted small' }, S.otoceni ? `pokládá se ${popisOtoceni(S.otoceni)}` : 'bez otočení'));
+  }
+
+  function nahledDlazdice(i, velikost = 32, o = 0) {
     const c = h('canvas', { width: velikost, height: velikost, class: 'ed-nahled' });
     const g = c.getContext('2d');
     g.imageSmoothingEnabled = false;
-    g.drawImage(S.atlas, (i % k.sloupcu) * k.dlazdice, Math.floor(i / k.sloupcu) * k.dlazdice,
-      k.dlazdice, k.dlazdice, 0, 0, velikost, velikost);
+    kresliDlazdiciDo(g, kod(i, o), 0, 0, velikost);
     return c;
   }
 
@@ -511,6 +563,7 @@ export function vytvorEditor(api) {
     paletaMrizka.replaceChildren(...deti);
     const v = S.katalog.polozky.find((p) => p.i === S.vybrana);
     popisVybrane.replaceChildren(v ? `${v.jmeno}${v.role ? ` · ${v.role}` : ''}` : 'Vyber dlaždici');
+    kresliOtoceni();
   }
 
   // ---------- lišta nástrojů ----------
@@ -572,7 +625,8 @@ export function vytvorEditor(api) {
       : 'zatím prázdný svět';
     stavovyRadek.replaceChildren(
       `${S.nazev} · ${rozsah} · zoom ${popisZoomu(S.zoom)} · štětec ${S.sila}`
-      + `${v ? ` · ${v.jmeno}` : ''}${S.kurzor ? ` · kurzor ${S.kurzor.x},${S.kurzor.y}` : ''}`);
+      + `${v ? ` · ${v.jmeno}${S.otoceni ? ` ${popisOtoceni(S.otoceni)}` : ''}` : ''}`
+      + `${S.kurzor ? ` · kurzor ${S.kurzor.x},${S.kurzor.y}` : ''}`);
   }
 
   // ---------- myš a klávesy ----------
@@ -595,17 +649,18 @@ export function vytvorEditor(api) {
     const { x, y } = naMape(e);
     const mazat = S.nastroj === 'guma';
     if (S.nastroj === 'kapatko') {
-      const i = S.svet.dej(x, y);
-      if (i >= 0) {
-        S.vybrana = i;
-        S.typ = S.katalog.polozky.find((p) => p.i === i)?.typ ?? S.typ;
+      const v = S.svet.dej(x, y);
+      if (v >= 0) {
+        S.vybrana = cisloDlazdice(v);
+        S.otoceni = otoceniDlazdice(v);     // kapátko bere dlaždici i s otočením
+        S.typ = S.katalog.polozky.find((p) => p.i === S.vybrana)?.typ ?? S.typ;
         S.nastroj = 'stetec';
         kresliPaletu(); kresliListu(); stav();
       }
       return;
     }
     if (S.vybrana == null && !mazat) return toast('Vyber nejdřív dlaždici v paletě');
-    const dlazdice = mazat ? PRAZDNO : S.vybrana;
+    const dlazdice = mazat ? PRAZDNO : polozena();
     if (S.nastroj === 'obdelnik') { S.obdelnikOd = { x, y, ted: { x, y }, dlazdice }; kresli(); return; }
     zacniTah();
     kresliSe = true;
@@ -624,7 +679,7 @@ export function vytvorEditor(api) {
     }
     if (S.obdelnikOd) { S.obdelnikOd.ted = S.kurzor; return kresli(); }
     if (!kresliSe) return pozdejiStav();
-    tahStetcem(S.kurzor.x, S.kurzor.y, S.nastroj === 'guma' ? PRAZDNO : S.vybrana);
+    tahStetcem(S.kurzor.x, S.kurzor.y, S.nastroj === 'guma' ? PRAZDNO : polozena());
     kresli();
   });
 
@@ -668,6 +723,8 @@ export function vytvorEditor(api) {
     if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'z') { e.preventDefault(); return vrat(S.historie, S.budoucnost); }
     if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'y') { e.preventDefault(); return vrat(S.budoucnost, S.historie); }
     if (e.key.toLowerCase() === 'f') { e.preventDefault(); return celySvet(); }
+    if (e.key.toLowerCase() === 'o') { e.preventDefault(); return otoc(e.shiftKey ? -1 : 1); }
+    if (e.key.toLowerCase() === 'x') { e.preventDefault(); return preklop(); }
     const n = NASTROJE.find((x) => x.klavesa === e.key.toLowerCase());
     if (n) { S.nastroj = n.id; kresliListu(); }
   }
@@ -703,13 +760,11 @@ export function vytvorEditor(api) {
     const c = h('canvas', { width: w, height: v });
     const g = c.getContext('2d');
     g.imageSmoothingEnabled = false;
-    const k = S.katalog;
     for (let y = m.y0; y <= m.y1; y++) {
       for (let x = m.x0; x <= m.x1; x++) {
-        const i = S.svet.dej(x, y);
-        if (i < 0) continue;
-        g.drawImage(S.atlas, (i % k.sloupcu) * k.dlazdice, Math.floor(i / k.sloupcu) * k.dlazdice,
-          k.dlazdice, k.dlazdice, (x - m.x0) * 32, (y - m.y0) * 32, 32, 32);
+        const hodnota = S.svet.dej(x, y);
+        if (hodnota < 0) continue;
+        kresliDlazdiciDo(g, hodnota, (x - m.x0) * 32, (y - m.y0) * 32, 32);
       }
     }
     const blob = await new Promise((hotovo) => c.toBlob(hotovo, 'image/png'));
@@ -765,7 +820,7 @@ export function vytvorEditor(api) {
     h('div', { class: 'ed-hlavni-zalozky' },
       h('button', { class: 'on', onclick: (e) => prepniBok(e.target, 'dlazdice') }, 'Dlaždice'),
       h('button', { onclick: (e) => prepniBok(e.target, 'objekty') }, 'Objekty')),
-    h('div', { class: 'ed-obsah', id: 'ed-dlazdice' }, paletaZalozky, paletaMrizka, popisVybrane),
+    h('div', { class: 'ed-obsah', id: 'ed-dlazdice' }, paletaZalozky, paletaMrizka, popisVybrane, otoceniRada),
     h('div', { class: 'ed-obsah', id: 'ed-objekty', hidden: true }, panelObjektu));
 
   function prepniBok(tlacitko, co) {

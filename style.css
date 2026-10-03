@@ -323,6 +323,10 @@ input:focus, select:focus, textarea:focus { outline: 2px solid var(--accent); ou
 .ed-dlazdice.on { border-color: var(--accent); }
 .ed-nahled { image-rendering: pixelated; display: block; width: 32px; height: 32px; }
 .ed-vybrana { padding: 8px 2px 0; }
+.ed-otoceni { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-top: 8px; padding-top: 8px; border-top: 1px solid var(--line); }
+.ed-otoceni .ed-nahled { width: 48px; height: 48px; }
+.ed-otoceni-tlacitka { display: flex; gap: 4px; }
+.ed-otoceni .icon-btn.on { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); }
 .ed-prazdno p { margin: 6px 0; }
 .ed-platno-obal { flex: 1; min-width: 0; position: relative; overflow: hidden; }
 .ed-platno { display: block; image-rendering: pixelated; touch-action: none; cursor: crosshair; }
