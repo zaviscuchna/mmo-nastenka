@@ -383,7 +383,7 @@ export function vytvorBoj(api) {
       kalkEl.replaceChildren();
       obsah.replaceChildren(h('p', { class: S.chyba ? 'empty err' : 'empty' },
         S.chyba || (S.nacitam ? 'Načítám výchozí hodnoty a balanc z repa…' : '')),
-      S.chyba ? h('p', { class: 'empty' }, h('button', { class: 'btn', onclick: nacti }, 'Zkusit znovu')) : null);
+      ...(S.chyba ? [h('p', { class: 'empty' }, h('button', { class: 'btn', onclick: nacti }, 'Zkusit znovu'))] : []));
       obnovListu();
       return;
     }
