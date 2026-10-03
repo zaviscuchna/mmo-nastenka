@@ -66,6 +66,23 @@ const NASTROJE = [
   { id: 'ruka', znak: '✋', nazev: 'Posun (mezerník nebo prostřední tlačítko)', klavesa: 'h' },
 ];
 
+// Měřítko postav: kolik místa na mapě zaberou hráč a nepřátelé. Čísla jsou ze hry —
+// výšky a srážková těla nepřátel z `shared/src/nepratele.ts`, tělo hráče z `shared/src/pohyb.ts`
+// (TELO) a jeho výška z `docs/art/README.md`. Když se ve hře změní, přepiš je i tady.
+// `v` = výška postavy ve světových pixelech (dlaždice má 32), `telo` = srážkový obdélník u nohou.
+const MERITKO_POSTAV = [
+  { jmeno: 'Vlk', v: 18, telo: { sirka: 12, vyska: 8 }, ctyrnoh: true },
+  { jmeno: 'Skřetí vrhač', v: 40, telo: { sirka: 16, vyska: 10 } },
+  { jmeno: 'Skřet', v: 44, telo: { sirka: 18, vyska: 10 } },
+  { jmeno: 'Hráč', v: 48, telo: { sirka: 18, vyska: 10 }, hrac: true },
+  { jmeno: 'Skřetí válečník', v: 64, telo: { sirka: 28, vyska: 14 } },
+  { jmeno: 'Strážce hlubin', v: 92, telo: { sirka: 36, vyska: 16 } },
+  { jmeno: 'Utopený arcibiskup', v: 100, telo: { sirka: 40, vyska: 18 } },
+];
+const MEZERA_POSTAV = 22;   // světových pixelů mezi postavami
+const BARVA_MERITKA = '#6fd3ff';
+const BARVA_HRACE = '#f2b84b';
+
 // ---------------------------------------------------------------- svět po kusech
 
 /** Nekonečná plocha dlaždic. Klíč kusu je „cx,cy", uvnitř je pole KUS × KUS. */
@@ -192,6 +209,9 @@ export function vytvorEditor(api) {
     nastroj: 'stetec',
     sila: 1,              // šířka štětce v dlaždicích
     mrizka: true,
+    postavy: false,       // měřítko postav na mapě (zapíná se tlačítkem 🧍)
+    postavyX: 0,          // levý okraj řady, světové pixely
+    postavyY: 0,          // zem, na které postavy stojí, světové pixely
     zoom: 3,
     posunX: 0,
     posunY: 0,
@@ -706,6 +726,7 @@ export function vytvorEditor(api) {
         ctx.setLineDash([]);
       }
     }
+    kresliMeritko();
   }
 
   /** Hodně oddálený svět: jeden kus = jedno drawImage z náhledu, dlaždice je jen barevný čtvereček. */
@@ -798,6 +819,150 @@ export function vytvorEditor(api) {
     const sy = m ? m.y0 + m.vyska / 2 : 0;
     S.posunX = Math.round(platno.width / 2 - sx * d);
     S.posunY = Math.round(platno.height / 2 - sy * d);
+  }
+
+  // ---------- měřítko postav ----------
+
+  /** Kde v řadě stojí která postava (světové pixely od `S.postavyX`) a jak je řada velká. */
+  function meritkoRozmery() {
+    const mista = [];
+    let x = 0;
+    for (const p of MERITKO_POSTAV) {
+      const sirka = Math.max(p.telo.sirka, p.v * 0.34);
+      mista.push({ p, stred: x + sirka / 2, sirka });
+      x += sirka + MEZERA_POSTAV;
+    }
+    return {
+      mista,
+      sirka: Math.max(0, x - MEZERA_POSTAV),
+      vyska: Math.max(...MERITKO_POSTAV.map((p) => p.v)),
+    };
+  }
+
+  /** Je bod (světové pixely) na řadě postav? Používá se na její přetažení. */
+  function naMeritku(b) {
+    if (!S.postavy) return false;
+    const r = meritkoRozmery();
+    return b.x >= S.postavyX - 8 && b.x <= S.postavyX + r.sirka + 8
+      && b.y >= S.postavyY - r.vyska - 10 && b.y <= S.postavyY + 10;
+  }
+
+  /** Postaví řadu doprostřed pohledu, nohama na čáru mezi dlaždicemi. */
+  function meritkoNaStred() {
+    const r = meritkoRozmery();
+    S.postavyX = (platno.width / 2 - S.posunX) / S.zoom - r.sirka / 2;
+    S.postavyY = Math.round(((platno.height / 2 - S.posunY) / S.zoom + r.vyska / 2) / 32) * 32;
+  }
+
+  /** Člověk zepředu: hlava, trup, nohy, paže. Všechno odvozené od výšky, ať to sedí v každé velikosti. */
+  function siluetaClovek(g, cx, zem, h) {
+    const w = h * 0.3;
+    const hlava = h * 0.115;
+    const ramena = zem - h + hlava * 2.1;
+    const rozkrok = zem - h * 0.4;
+    g.beginPath();
+    g.arc(cx, zem - h + hlava, hlava, 0, Math.PI * 2);
+    g.fill(); g.stroke();
+    g.beginPath();
+    g.moveTo(cx - w / 2, ramena);
+    g.lineTo(cx + w / 2, ramena);
+    g.lineTo(cx + w * 0.42, rozkrok);
+    g.lineTo(cx + w * 0.42, zem);
+    g.lineTo(cx + w * 0.1, zem);
+    g.lineTo(cx + w * 0.1, rozkrok);
+    g.lineTo(cx - w * 0.1, rozkrok);
+    g.lineTo(cx - w * 0.1, zem);
+    g.lineTo(cx - w * 0.42, zem);
+    g.lineTo(cx - w * 0.42, rozkrok);
+    g.closePath();
+    g.fill(); g.stroke();
+    g.beginPath();
+    g.lineWidth = Math.max(1, h * 0.045);
+    g.moveTo(cx - w * 0.44, ramena + h * 0.04);
+    g.lineTo(cx - w * 0.56, rozkrok - h * 0.06);
+    g.moveTo(cx + w * 0.44, ramena + h * 0.04);
+    g.lineTo(cx + w * 0.56, rozkrok - h * 0.06);
+    g.stroke();
+  }
+
+  /** Vlk a spol.: nízké tělo na čtyřech, ať se nepletou s člověkem.
+   *  Temeno hlavy musí vyjít na `zem - h`, jinak by nad postavu zasahoval popisek. */
+  function siluetaCtyrnoh(g, cx, zem, h) {
+    const delka = h * 2;
+    const hribet = zem - h * 0.6;
+    g.beginPath();
+    g.ellipse(cx - delka * 0.08, hribet, delka * 0.4, h * 0.26, 0, 0, Math.PI * 2);
+    g.fill(); g.stroke();
+    g.beginPath();
+    g.arc(cx + delka * 0.36, zem - h * 0.72, h * 0.26, 0, Math.PI * 2);
+    g.fill(); g.stroke();
+    g.beginPath();
+    g.lineWidth = Math.max(1, h * 0.1);
+    for (const f of [-0.38, -0.2, 0.08, 0.24]) {
+      g.moveTo(cx + delka * f, hribet + h * 0.16);
+      g.lineTo(cx + delka * f, zem);
+    }
+    g.stroke();
+  }
+
+  function kresliMeritko() {
+    if (!S.postavy) return;
+    const z = S.zoom;
+    const r = meritkoRozmery();
+    const zem = S.posunY + S.postavyY * z;
+    const levo = S.posunX + S.postavyX * z;
+    const popisky = r.mista[0].sirka * z >= 14 && z >= 0.25;
+
+    // Čára země přes celou řadu — bez ní by se výšky špatně porovnávaly.
+    ctx.save();
+    ctx.strokeStyle = 'rgba(111,211,255,.5)';
+    ctx.lineWidth = 1;
+    ctx.setLineDash([4, 3]);
+    ctx.beginPath();
+    ctx.moveTo(levo - 10, Math.round(zem) + 0.5);
+    ctx.lineTo(levo + r.sirka * z + 10, Math.round(zem) + 0.5);
+    ctx.stroke();
+    ctx.setLineDash([]);
+
+    for (const m of r.mista) {
+      const cx = levo + m.stred * z;
+      const h = m.p.v * z;
+      const barva = m.p.hrac ? BARVA_HRACE : BARVA_MERITKA;
+      // Srážkové tělo: kolik místa postava doopravdy zabere, když jde kolem stromu.
+      ctx.fillStyle = m.p.hrac ? 'rgba(242,184,75,.22)' : 'rgba(111,211,255,.18)';
+      ctx.fillRect(cx - m.p.telo.sirka * z / 2, zem - m.p.telo.vyska * z,
+        m.p.telo.sirka * z, m.p.telo.vyska * z);
+
+      ctx.fillStyle = m.p.hrac ? 'rgba(242,184,75,.55)' : 'rgba(111,211,255,.45)';
+      ctx.strokeStyle = barva;
+      ctx.lineWidth = Math.max(1, z * 0.8);
+      if (m.p.ctyrnoh) siluetaCtyrnoh(ctx, cx, zem, h);
+      else siluetaClovek(ctx, cx, zem, h);
+
+      if (!popisky) continue;
+      ctx.fillStyle = barva;
+      ctx.font = `${m.p.hrac ? 'bold ' : ''}11px system-ui, sans-serif`;
+      ctx.textAlign = 'center';
+      ctx.fillText(m.p.jmeno, cx, zem - h - 14);
+      ctx.fillStyle = 'rgba(255,255,255,.65)';
+      ctx.font = '10px system-ui, sans-serif';
+      ctx.fillText(`${m.p.v} px · ${(m.p.v / 32).toFixed(2).replace(/\.?0+$/, '').replace('.', ',')} dl.`,
+        cx, zem - h - 3);
+    }
+
+    if (popisky) {
+      // Čtverec jedné dlaždice vedle řady: proti čemu se to měří.
+      const d = 32 * z;
+      ctx.strokeStyle = 'rgba(111,211,255,.7)';
+      ctx.lineWidth = 1;
+      ctx.strokeRect(Math.round(levo - 14 - d) + 0.5, Math.round(zem - d) + 0.5, d, d);
+      ctx.fillStyle = 'rgba(255,255,255,.65)';
+      ctx.font = '10px system-ui, sans-serif';
+      ctx.textAlign = 'center';
+      ctx.fillText('1 dlaždice', levo - 14 - d / 2, zem + 13);
+    }
+    ctx.textAlign = 'left';
+    ctx.restore();
   }
 
   // ---------- paleta ----------
@@ -1064,10 +1229,23 @@ export function vytvorEditor(api) {
         class: `icon-btn${S.mrizka ? ' on' : ''}`, title: 'Mřížka',
         onclick: () => { S.mrizka = !S.mrizka; kresliListu(); kresli(); },
       }, '#'),
+      h('button', {
+        class: `icon-btn${S.postavy ? ' on' : ''}`,
+        title: 'Měřítko postav (P) — postaví na mapu hráče a nepřátele ve skutečné velikosti. Dá se přetáhnout, dalším klikem zmizí.',
+        onclick: prepniMeritko,
+      }, '🧍'),
       h('span', { class: 'ed-oddel' }),
       h('button', { class: 'icon-btn', title: 'Zpět (Ctrl+Z)', onclick: () => vrat(S.historie, S.budoucnost) }, '↶'),
       h('button', { class: 'icon-btn', title: 'Znovu (Ctrl+Y)', onclick: () => vrat(S.budoucnost, S.historie) }, '↷'),
     );
+  }
+
+  /** Zapne měřítko postav doprostřed pohledu, nebo ho zase schová. */
+  function prepniMeritko() {
+    S.postavy = !S.postavy;
+    if (S.postavy) meritkoNaStred();
+    kresliListu();
+    kresli();
   }
 
   /** 8× nebo 2/3× — zlomek se píše jako zlomek, ať se to dá přečíst. */
@@ -1118,6 +1296,7 @@ export function vytvorEditor(api) {
   let tazenyObjekt = null;      // { i, dx, dy, nove, pohnuto } — objekt tažený po mapě
   let pravyKlik = null;         // kde se stisklo pravé tlačítko (klik × posun mapy)
   let ramecek = null;           // rozdělaný výběrový rámeček { x0, y0, x1, y1, pridat }
+  let tazeneMeritko = null;     // { dx, dy } — řada postav tažená po mapě
 
   /**
    * Klik na mapu nástrojem ✥ nebo 🌲: na objektu ho chytne (s Ctrl ho jen přibere do výběru),
@@ -1237,6 +1416,11 @@ export function vytvorEditor(api) {
       posouvaSe = { x: e.clientX - S.posunX, y: e.clientY - S.posunY };
       return;
     }
+    // Měřítko postav leží nad mapou: když se stiskne na něm, táhne se ono a nekreslí se.
+    if (S.postavy) {
+      const b = naSvet(e);
+      if (naMeritku(b)) { tazeneMeritko = { dx: b.x - S.postavyX, dy: b.y - S.postavyY }; return; }
+    }
     if (S.nastroj === 'objekt' || S.nastroj === 'vyber') return zacniObjekt(e);
     const { x, y } = naMape(e);
     const mazat = S.nastroj === 'guma';
@@ -1264,6 +1448,12 @@ export function vytvorEditor(api) {
 
   platno.addEventListener('pointermove', (e) => {
     S.kurzor = naMape(e);
+    if (tazeneMeritko) {
+      const b = naSvet(e);
+      S.postavyX = b.x - tazeneMeritko.dx;
+      S.postavyY = Math.round((b.y - tazeneMeritko.dy) / 32) * 32;   // nohy drží na čáře mezi dlaždicemi
+      return kresli();
+    }
     if (ramecek) { const b = naSvet(e); ramecek.x1 = b.x; ramecek.y1 = b.y; return kresli(); }
     if (tazenyObjekt) return tahniObjekt(e);
     if (posouvaSe) {
@@ -1285,6 +1475,7 @@ export function vytvorEditor(api) {
   }
 
   function pust(e) {
+    if (tazeneMeritko) { tazeneMeritko = null; return; }
     if (ramecek) return dokonciRamecek();
     if (tazenyObjekt) {
       tazenyObjekt = null;
@@ -1333,6 +1524,7 @@ export function vytvorEditor(api) {
     if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'z') { e.preventDefault(); return vrat(S.historie, S.budoucnost); }
     if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'y') { e.preventDefault(); return vrat(S.budoucnost, S.historie); }
     if (e.key.toLowerCase() === 'f') { e.preventDefault(); return celySvet(); }
+    if (e.key.toLowerCase() === 'p') { e.preventDefault(); return prepniMeritko(); }
     // Když je vybraný objekt na mapě, otáčí se on; jinak dlaždice, co se zrovna pokládá.
     const naObjekt = S.oznacene.length > 0;
     if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'a' && S.objekty.length) {
