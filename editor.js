@@ -7,7 +7,7 @@
 //
 // Dlaždice bere z atlasu v herním repu (board/editor/dlazdice.png + dlazdice.json, vyrábí je
 // tools/dlazdice-editoru.py). Posun pravým (nebo prostředním) tlačítkem a mezerníkem, zoom kolečkem
-// od 1/32× (dlaždice je jeden pixel, vejde se celý kraj) po 8×. Hodně oddálený svět se kreslí
+// od 1/32× (dlaždice je jeden pixel, vejde se celý kraj) po 8×, po krocích kolem 1,5×. Hodně oddálený svět se kreslí
 // z náhledů kusů, ne po dlaždicích — po dlaždicích by to bylo přes milion kreslení na překreslení.
 //
 // Formát projektu (stahuje se i nahrává):
@@ -21,8 +21,10 @@
 const ULOZISTE = 'mmo-nastenka-editor';
 const ATLAS_PNG = 'board/editor/dlazdice.png';
 const ATLAS_JSON = 'board/editor/dlazdice.json';
-const ZOOMY = [1 / 32, 1 / 16, 1 / 8, 1 / 4, 1 / 2, 1, 2, 3, 4, 6, 8];
-const NAHLED_DO = 4;            // dlaždice 4 px a menší: kreslí se z náhledů kusů, ne po dlaždicích
+// Krok je zhruba jedenapůlnásobek, ať se dá doladit. Nad 1× jen celé násobky, aby se pixelová
+// grafika zvětšovala celým číslem; pod 1× se zmenšuje, tam vadí jen to, aby dlaždice navazovaly.
+const ZOOMY = [1 / 32, 1 / 24, 1 / 16, 1 / 12, 1 / 8, 1 / 6, 1 / 4, 1 / 3, 1 / 2, 2 / 3, 1, 2, 3, 4, 5, 6, 8];
+const NAHLED_DO = 6;            // dlaždice 6 px a menší: kreslí se z náhledů kusů, ne po dlaždicích
 const NAHLEDY_STROP = 4096;     // kolik náhledů kusů se drží v paměti (jeden je 32 × 32 px, pár kB)
 const KUS = 32;                 // dlaždic na stranu jednoho kusu světa
 const VYPLN_STROP = 40000;      // výplň v nekonečnu musí mít strop, jinak by běžela donekonečna
@@ -378,22 +380,24 @@ export function vytvorEditor(api) {
   function zapomenNahled(x, y) { nahledy.delete(`${Math.floor(x / KUS)},${Math.floor(y / KUS)}`); }
 
   /** Nakreslí hodnotu ze světa (dlaždice i s otočením) do zadaného plátna. */
-  function kresliDlazdiciDo(g, v, dx, dy, d) {
+  function kresliDlazdiciDo(g, v, dx, dy, sirka, vyska = sirka) {
     const k = S.katalog;
     const i = cisloDlazdice(v);
     const o = otoceniDlazdice(v);
     const sx = (i % k.sloupcu) * k.dlazdice;
     const sy = Math.floor(i / k.sloupcu) * k.dlazdice;
-    if (!o) { g.drawImage(S.atlas, sx, sy, k.dlazdice, k.dlazdice, dx, dy, d, d); return; }
+    if (!o) { g.drawImage(S.atlas, sx, sy, k.dlazdice, k.dlazdice, dx, dy, sirka, vyska); return; }
     g.save();
-    g.translate(dx + d / 2, dy + d / 2);
+    g.translate(dx + sirka / 2, dy + vyska / 2);
     if (o >= 4) g.scale(-1, 1);             // překlopení, až po něm se otáčí
     g.rotate((o % 4) * Math.PI / 2);
-    g.drawImage(S.atlas, sx, sy, k.dlazdice, k.dlazdice, -d / 2, -d / 2, d, d);
+    const w = o % 2 ? vyska : sirka;        // po čtvrtotáčce si strany vymění místo
+    const v2 = o % 2 ? sirka : vyska;
+    g.drawImage(S.atlas, sx, sy, k.dlazdice, k.dlazdice, -w / 2, -v2 / 2, w, v2);
     g.restore();
   }
 
-  const kresliDlazdici = (v, dx, dy, d) => kresliDlazdiciDo(ctx, v, dx, dy, d);
+  const kresliDlazdici = (v, dx, dy, sirka, vyska) => kresliDlazdiciDo(ctx, v, dx, dy, sirka, vyska);
 
   function kresli() {
     if (!platno.width) return;
@@ -410,10 +414,16 @@ export function vytvorEditor(api) {
     if (d <= NAHLED_DO) {
       kresliZNahledu(x0, y0, x1, y1, d);
     } else {
+      // Dlaždice se kreslí od svého okraje k okraji té další. Při zoomu, co nevyjde na celé
+      // pixely (třeba 1/3×), by jinak mezi nimi prosvítaly mezery.
       for (let y = y0; y < y1; y++) {
+        const py = Math.round(S.posunY + y * d);
+        const vyska = Math.round(S.posunY + (y + 1) * d) - py;
         for (let x = x0; x < x1; x++) {
-          const i = S.svet.dej(x, y);
-          if (i >= 0) kresliDlazdici(i, Math.round(S.posunX + x * d), Math.round(S.posunY + y * d), d);
+          const v = S.svet.dej(x, y);
+          if (v < 0) continue;
+          const px = Math.round(S.posunX + x * d);
+          kresliDlazdici(v, px, py, Math.round(S.posunX + (x + 1) * d) - px, vyska);
         }
       }
     }
@@ -455,9 +465,13 @@ export function vytvorEditor(api) {
   function kresliZNahledu(x0, y0, x1, y1, d) {
     const dk = KUS * d;               // pixelů na kus (při 1/32× je to 32, tedy náhled 1 : 1)
     for (let cy = Math.floor(y0 / KUS); cy <= Math.floor((y1 - 1) / KUS); cy++) {
+      const py = Math.round(S.posunY + cy * dk);
+      const vyska = Math.round(S.posunY + (cy + 1) * dk) - py;
       for (let cx = Math.floor(x0 / KUS); cx <= Math.floor((x1 - 1) / KUS); cx++) {
         const n = nahledKusu(`${cx},${cy}`);
-        if (n) ctx.drawImage(n, Math.round(S.posunX + cx * dk), Math.round(S.posunY + cy * dk), dk, dk);
+        if (!n) continue;
+        const px = Math.round(S.posunX + cx * dk);
+        ctx.drawImage(n, px, py, Math.round(S.posunX + (cx + 1) * dk) - px, vyska);
       }
     }
   }
@@ -598,8 +612,15 @@ export function vytvorEditor(api) {
     );
   }
 
-  /** 8× nebo 1/8× — zlomek se píše jako zlomek, ať se to dá přečíst. */
-  function popisZoomu(z) { return z >= 1 ? `${z}×` : `1/${Math.round(1 / z)}×`; }
+  /** 8× nebo 2/3× — zlomek se píše jako zlomek, ať se to dá přečíst. */
+  function popisZoomu(z) {
+    if (z >= 1) return `${z}×`;
+    for (const citatel of [1, 2, 3]) {
+      const jmenovatel = citatel / z;
+      if (Math.abs(jmenovatel - Math.round(jmenovatel)) < 1e-9) return `${citatel}/${Math.round(jmenovatel)}×`;
+    }
+    return `${Math.round(z * 100)} %`;
+  }
 
   function zoomuj(smer, sx, sy) {
     const i = ZOOMY.indexOf(S.zoom);
