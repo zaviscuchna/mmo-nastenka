@@ -327,6 +327,8 @@ input:focus, select:focus, textarea:focus { outline: 2px solid var(--accent); ou
 .ed-otoceni .ed-nahled { width: 48px; height: 48px; }
 .ed-otoceni-tlacitka { display: flex; gap: 4px; }
 .ed-otoceni .icon-btn.on { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); }
+.ed-nahled-obj { width: 48px; height: 48px; }
+.ed-duch { position: fixed; z-index: 70; pointer-events: none; opacity: .85; transform: translate(-50%, -100%); image-rendering: pixelated; }
 .ed-prazdno p { margin: 6px 0; }
 .ed-platno-obal { flex: 1; min-width: 0; position: relative; overflow: hidden; }
 .ed-platno { display: block; image-rendering: pixelated; touch-action: none; cursor: crosshair; }
