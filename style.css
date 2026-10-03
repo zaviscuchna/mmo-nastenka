@@ -351,3 +351,144 @@ input:focus, select:focus, textarea:focus { outline: 2px solid var(--accent); ou
   .ed-bok { width: auto; max-height: 40%; border-right: 0; border-bottom: 1px solid var(--line); }
   .ed-lista, .ed-stav { padding-left: 16px; padding-right: 16px; }
 }
+
+/* Boj a nepřátelé (boj.js, ladění balancu) */
+.boj { padding: 0 0 48px; }
+.boj-lista {
+  display: flex; gap: 10px 14px; align-items: center; flex-wrap: wrap;
+  padding: 10px 20px; background: var(--panel); border-bottom: 1px solid var(--line);
+}
+.boj-skupiny { display: flex; gap: 4px; flex-wrap: wrap; }
+.boj-skupiny button {
+  background: none; border: 1px solid var(--line); border-radius: 99px; padding: 4px 12px; color: var(--muted);
+  font-family: var(--pixel); font-size: 15px; display: inline-flex; gap: 6px; align-items: center;
+}
+.boj-skupiny button.on { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); }
+.boj-tecka { background: var(--talk); color: #0b1420; border-radius: 99px; font: 600 11px/1 system-ui, sans-serif; padding: 3px 6px; }
+.boj-hledat { display: flex; gap: 10px; align-items: center; flex: 1 1 260px; min-width: 0; }
+.boj-hledat input[type=search] { flex: 1; min-width: 0; padding: 6px 10px; }
+.boj-jen { display: flex; gap: 6px; align-items: center; color: var(--muted); white-space: nowrap; }
+.boj-jen input { width: auto; }
+.boj-akce { display: flex; gap: 8px; align-items: center; margin-left: auto; flex-wrap: wrap; }
+.boj-pocet.ma { color: var(--accent); font-weight: 600; }
+.boj-stav { margin: 10px 20px 0; }
+
+.boj-kalk { margin: 12px 20px 0; background: var(--panel); border: 1px solid var(--line); border-radius: 10px; }
+.boj-kalk summary { cursor: pointer; padding: 10px 14px; font-family: var(--pixel); color: var(--accent); }
+.boj-kalk summary b { font-weight: 700; }
+.boj-kalk summary .muted { font-family: system-ui, sans-serif; }
+.boj-kalk-pole { display: flex; flex-wrap: wrap; gap: 10px 14px; padding: 0 14px 6px; }
+.boj-pole { display: flex; flex-direction: column; gap: 3px; font-size: 12px; color: var(--muted); }
+.boj-pole select, .boj-pole input { width: auto; min-width: 90px; padding: 5px 8px; font-size: 14px; }
+.boj-pole input[type=number] { width: 90px; }
+.boj-noc { flex-direction: row; align-items: center; gap: 6px; align-self: flex-end; padding-bottom: 7px; font-size: 14px; color: var(--text); }
+.boj-noc input { width: auto; min-width: 0; }
+.boj-pozn { margin: 0; padding: 0 14px 12px; }
+
+.boj-obsah {
+  display: grid; gap: 16px; padding: 16px 20px; align-items: start;
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 480px), 1fr));
+}
+.boj-karta { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 14px; min-width: 0; }
+.boj-karta-siroka { grid-column: 1 / -1; }
+.boj-karta > header { display: flex; gap: 14px; align-items: flex-start; margin-bottom: 6px; }
+.boj-karta h3 { font-family: var(--pixel); font-size: 22px; margin: 0 0 6px; color: var(--accent); line-height: 1.1; }
+.boj-karta h4 { font-family: var(--pixel); font-size: 15px; font-weight: 500; color: var(--muted); margin: 14px 0 4px; letter-spacing: .02em; }
+.boj-obr-box { flex: none; background: #0d0c11; border: 1px solid var(--line); border-radius: 8px; padding: 4px; display: grid; place-items: center; min-width: 72px; min-height: 72px; }
+.boj-obr { image-rendering: pixelated; display: block; }
+.boj-obr.chybi { opacity: .2; }
+.boj-chips { display: flex; flex-wrap: wrap; gap: 4px; }
+.boj-chip { font-size: 12px; background: var(--panel-2); color: var(--muted); border-radius: 4px; padding: 1px 7px; }
+.boj-chip.boss { color: var(--no); font-weight: 600; }
+.boj-nezname { border-color: var(--no); grid-column: 1 / -1; }
+
+.boj-sekce { border-top: 1px solid var(--line); margin-top: 8px; }
+.boj-sekce > summary { cursor: pointer; list-style: none; display: flex; align-items: center; gap: 6px; }
+.boj-sekce > summary::-webkit-details-marker { display: none; }
+.boj-sekce > summary::before { content: '▸'; color: var(--muted); font-size: 12px; margin-top: 8px; }
+.boj-sekce[open] > summary::before { content: '▾'; }
+.boj-sekce > summary h4 { flex: 1; }
+.boj-sekce h4 .small { font-family: system-ui, sans-serif; font-weight: 400; }
+.boj-radek {
+  display: grid; grid-template-columns: minmax(0, 1fr) auto 128px; grid-template-areas: "popis vstup meta" "varov varov varov";
+  gap: 2px 10px; padding: 6px 6px; margin: 0 -6px; border-radius: 6px; align-items: center;
+}
+.boj-radek:hover { background: rgba(255, 255, 255, .02); }
+.boj-radek.zmena { background: rgba(242, 184, 75, .07); box-shadow: inset 3px 0 0 var(--accent); }
+.boj-radek.spatne { background: rgba(239, 111, 108, .1); box-shadow: inset 3px 0 0 var(--no); }
+.boj-radek.odebrano .boj-popis { text-decoration: line-through; color: var(--muted); }
+.boj-popis { grid-area: popis; font-size: 14px; line-height: 1.3; min-width: 0; }
+.boj-pozor { color: var(--accent); cursor: help; }
+.boj-vstup { grid-area: vstup; display: flex; gap: 8px; align-items: center; justify-content: flex-end; }
+.boj-vstup input[type=number] { width: 96px; padding: 4px 6px; text-align: right; font-variant-numeric: tabular-nums; }
+.boj-vstup input[type=text] { width: min(320px, 50vw); padding: 4px 6px; font-size: 13px; }
+.boj-vstup input[type=range] { width: 110px; padding: 0; border: 0; background: none; accent-color: var(--accent); }
+.boj-jedn { color: var(--muted); font-size: 12px; min-width: 30px; }
+.boj-meta { grid-area: meta; display: flex; flex-wrap: wrap; gap: 2px 8px; align-items: center; justify-content: flex-end; font-size: 12px; line-height: 1.3; }
+.boj-vych { color: var(--muted); }
+.boj-delta { font-weight: 600; color: var(--talk); font-variant-numeric: tabular-nums; }
+.boj-delta.plus { color: var(--accent); }
+.boj-reset { background: none; border: 1px solid var(--line); border-radius: 4px; color: var(--muted); font-size: 12px; padding: 0 6px; line-height: 18px; }
+.boj-reset:hover { color: var(--text); border-color: var(--muted); }
+.boj-varov { grid-area: varov; display: flex; flex-direction: column; font-size: 12px; color: var(--no); text-align: right; }
+.boj-radek.zmena:not(.spatne) .boj-varov { color: var(--accent); }
+.boj-soucet { text-align: right; padding: 4px 0; }
+.boj-soucet .err { margin: 0; }
+
+.boj-skupinky { padding: 4px 0 8px; display: flex; flex-direction: column; gap: 6px; }
+.boj-varianty { display: flex; flex-direction: column; gap: 4px; }
+.boj-varianta { display: grid; grid-template-columns: 22px minmax(0, 1fr) auto auto; gap: 8px; align-items: center; }
+.boj-varianta input { padding: 4px 6px; font-size: 13px; }
+.boj-ikony { display: flex; gap: 2px; align-items: center; min-height: 32px; }
+.boj-ikony canvas { background: #0d0c11; border-radius: 3px; }
+.boj-skupinky select { width: auto; padding: 4px 8px; font-size: 13px; }
+.boj-typ { display: inline-flex; gap: 6px; align-items: center; white-space: nowrap; }
+.boj-typ canvas { background: #0d0c11; border-radius: 3px; flex: none; }
+
+.boj-tab-obal { overflow-x: auto; max-width: 100%; }
+.boj-tab { border-collapse: collapse; width: 100%; font-size: 13px; font-variant-numeric: tabular-nums; }
+.boj-tab th, .boj-tab td { padding: 4px 6px; text-align: left; vertical-align: middle; border-bottom: 1px solid var(--line); }
+.boj-tab thead th { font-weight: 500; color: var(--muted); font-size: 12px; white-space: nowrap; }
+.boj-tab .num { text-align: right; white-space: nowrap; }
+.boj-tab tr.nova td { border-top: 2px solid var(--line); }
+.boj-tab tbody th { font-weight: 400; color: var(--muted); white-space: pre; }
+.boj-tab td.vybrany { background: rgba(111, 168, 239, .08); }
+.boj-bunka { display: inline-flex; gap: 2px; align-items: center; }
+.boj-bunka input { width: 72px; padding: 3px 5px; font-size: 13px; text-align: right; }
+.boj-bunka.zmena input { border-color: var(--accent); background: rgba(242, 184, 75, .08); }
+.boj-bunka.spatne input { border-color: var(--no); }
+.boj-odvozene { margin-top: 12px; border-top: 1px dashed var(--line); }
+.boj-odv h4 { color: var(--talk); }
+.boj-odv > p { margin: 6px 0 0; }
+.boj-odv-misto select { width: auto; padding: 4px 8px; font-size: 13px; margin-bottom: 6px; max-width: 100%; }
+.boj-tab-odv tbody th { white-space: normal; }
+.boj-tab-n tbody th { white-space: pre; }
+.boj-tab b.lepsi { color: var(--yes); }
+.boj-tab b.horsi { color: var(--no); }
+.boj-tab b.jine { color: var(--accent); }
+.boj-urzony { margin: 8px 0 0; }
+
+.boj-dlg { max-width: min(860px, calc(100vw - 32px)); }
+.boj-dlg-telo { padding: 20px; display: flex; flex-direction: column; gap: 12px; }
+.boj-dlg h2 { font-family: var(--pixel); color: var(--accent); margin: 0; }
+.boj-rozdil tr.zpet td { color: var(--muted); }
+.boj-proc { display: flex; flex-direction: column; gap: 4px; }
+.boj-spor { background: var(--panel-2); border-radius: 8px; padding: 8px 12px; display: flex; flex-direction: column; gap: 4px; }
+.boj-spor p { margin: 0; }
+.boj-spor label { display: flex; gap: 6px; align-items: center; }
+.boj-spor input { width: auto; }
+
+@media (max-width: 760px) {
+  .boj-lista { padding: 10px 16px; }
+  .boj-akce { margin-left: 0; width: 100%; }
+  .boj-akce .btn { flex: 1; padding: 7px 8px; }
+  .boj-stav, .boj-kalk { margin-left: 16px; margin-right: 16px; }
+  .boj-obsah { padding: 12px 16px; gap: 12px; }
+  .boj-karta { padding: 12px; }
+  .boj-radek { grid-template-columns: minmax(0, 1fr) auto; grid-template-areas: "popis popis" "vstup meta" "varov varov"; }
+  .boj-vstup { justify-content: flex-start; }
+  .boj-vstup input[type=range] { flex: 1; min-width: 0; }
+  .boj-vstup input[type=text] { width: 100%; }
+}
+.boj-rozdil td { overflow-wrap: anywhere; }
+.boj-rozdil td.num { white-space: normal; min-width: 70px; }

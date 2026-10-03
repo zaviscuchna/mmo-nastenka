@@ -5,6 +5,7 @@
 // Všechno, co se tu udělá, je vidět i přímo na GitHubu.
 
 import { vytvorEditor } from './editor.js';
+import { vytvorBoj } from './boj.js';
 
 const CFG = {
   owner: 'zaviscuchna',
@@ -611,16 +612,29 @@ function dejEditor() {
   return editor;
 }
 
+let boj = null;
+/** Boj a nepřátelé (boj.js): ladění balancu, data se stahují až při prvním otevření. */
+function dejBoj() {
+  if (!boj) {
+    boj = vytvorBoj({ h, gh, repoImage, toast, encPath, CFG, me: () => state.me });
+    $('#app').append(boj.el);
+  }
+  return boj;
+}
+
 function render() {
   const stavba = state.tab === 'stavba';
   const jeEditor = state.tab === 'editor';
-  $('.filters').hidden = stavba || jeEditor;
-  $('#grid').hidden = stavba || jeEditor;
+  const jeBoj = state.tab === 'boj';
+  $('.filters').hidden = stavba || jeEditor || jeBoj;
+  $('#grid').hidden = stavba || jeEditor || jeBoj;
   $('#board').hidden = !stavba;
-  $('#empty').hidden = jeEditor || $('#empty').hidden;
+  $('#empty').hidden = jeEditor || jeBoj || $('#empty').hidden;
   $('#cat-filter').hidden = !(state.tab === 'vse' || CATS[state.tab]);
+  if (boj && !jeBoj) boj.skryj();
   if (jeEditor) { $('#empty').hidden = true; return dejEditor().ukaz(); }
   if (editor) editor.skryj();
+  if (jeBoj) { $('#empty').hidden = true; return dejBoj().ukaz(); }
   if (stavba) { $('#empty').hidden = true; return renderBoard(); }
   const list = visible();
   $('#grid').replaceChildren(...list.map(cardEl));
@@ -1315,7 +1329,7 @@ function setupUi() {
   }
   $('#cat-filter').onchange = (e) => { state.cat = e.target.value; render(); };
   fillCatSelect($('#cat-filter'), 'vse', true);
-  $('#new-item').onclick = () => openCompose(['vse', 'editor'].includes(state.tab) ? 'napad' : state.tab);
+  $('#new-item').onclick = () => openCompose(['vse', 'editor', 'boj'].includes(state.tab) ? 'napad' : state.tab);
   $('#navod').onclick = () => openNavod(NAVOD);
   $('#prompty-zbrani').onclick = () => openNavod(PROMPTY_ZBRANI);
   $('#navod-dlg').addEventListener('click', (e) => { if (e.target === e.currentTarget) e.currentTarget.close(); });
