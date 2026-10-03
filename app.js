@@ -4,6 +4,8 @@
 // Stavba = technický úkol; kdo na něm dělá = assignee, hotovo = zavřené issue.
 // Všechno, co se tu udělá, je vidět i přímo na GitHubu.
 
+import { vytvorEditor } from './editor.js';
+
 const CFG = {
   owner: 'zaviscuchna',
   repo: 'mmo-rpg',
@@ -599,12 +601,26 @@ function renderBoard() {
   }));
 }
 
+let editor = null;
+/** Editor map (editor.js) se staví až při prvním otevření záložky — atlas dlaždic se táhne z repa. */
+function dejEditor() {
+  if (!editor) {
+    editor = vytvorEditor({ h, gh, repoImage, toast, encPath, CFG });
+    $('#app').append(editor.el);
+  }
+  return editor;
+}
+
 function render() {
   const stavba = state.tab === 'stavba';
-  $('.filters').hidden = stavba;
-  $('#grid').hidden = stavba;
+  const jeEditor = state.tab === 'editor';
+  $('.filters').hidden = stavba || jeEditor;
+  $('#grid').hidden = stavba || jeEditor;
   $('#board').hidden = !stavba;
+  $('#empty').hidden = jeEditor || $('#empty').hidden;
   $('#cat-filter').hidden = !(state.tab === 'vse' || CATS[state.tab]);
+  if (jeEditor) { $('#empty').hidden = true; return dejEditor().ukaz(); }
+  if (editor) editor.skryj();
   if (stavba) { $('#empty').hidden = true; return renderBoard(); }
   const list = visible();
   $('#grid').replaceChildren(...list.map(cardEl));
@@ -1299,7 +1315,7 @@ function setupUi() {
   }
   $('#cat-filter').onchange = (e) => { state.cat = e.target.value; render(); };
   fillCatSelect($('#cat-filter'), 'vse', true);
-  $('#new-item').onclick = () => openCompose(state.tab === 'vse' ? 'napad' : state.tab);
+  $('#new-item').onclick = () => openCompose(['vse', 'editor'].includes(state.tab) ? 'napad' : state.tab);
   $('#navod').onclick = () => openNavod(NAVOD);
   $('#prompty-zbrani').onclick = () => openNavod(PROMPTY_ZBRANI);
   $('#navod-dlg').addEventListener('click', (e) => { if (e.target === e.currentTarget) e.currentTarget.close(); });
