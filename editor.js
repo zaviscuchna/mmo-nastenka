@@ -57,7 +57,8 @@ const NAZVY_TYPU = {
 
 const NASTROJE = [
   { id: 'stetec', znak: '🖌', nazev: 'Štětec (B)', klavesa: 'b' },
-  { id: 'objekt', znak: '🌲', nazev: 'Objekty (A) — pokládání a posouvání', klavesa: 'a' },
+  { id: 'vyber', znak: '✥', nazev: 'Výběr a posun objektů (V) — Ctrl přidá další, tažením rámeček', klavesa: 'v' },
+  { id: 'objekt', znak: '🌲', nazev: 'Pokládání objektů (A) — klikem položíš vybraný z palety', klavesa: 'a' },
   { id: 'obdelnik', znak: '▭', nazev: 'Obdélník (R)', klavesa: 'r' },
   { id: 'vypln', znak: '🪣', nazev: 'Výplň (G) — jen uvnitř už nakresleného', klavesa: 'g' },
   { id: 'guma', znak: '🧽', nazev: 'Guma (E)', klavesa: 'e' },
@@ -182,7 +183,7 @@ export function vytvorEditor(api) {
     objTyp: null,         // otevřená záložka v paletě objektů
     objVybrany: null,     // položka katalogu, která se pokládá
     objekty: [],          // položené objekty [{ j, x, y }], x a y je pata ve světových pixelech
-    objOznaceny: -1,      // index v S.objekty, se kterým se zrovna pracuje
+    oznacene: [],         // indexy v S.objekty, se kterými se zrovna pracuje (poslední je hlavní)
     objNacitam: false,
     katalog: null,        // { dlazdice, sloupcu, polozky }
     typ: 'trava',         // otevřená záložka palety
@@ -305,7 +306,7 @@ export function vytvorEditor(api) {
     if (krok.objekty) {
       opacny.objekty = S.objekty;
       S.objekty = krok.objekty;
-      S.objOznaceny = -1;
+      S.oznacene = [];
       kresliPaletuObjektu();
       kresliVybrany();
     }
@@ -395,6 +396,25 @@ export function vytvorEditor(api) {
 
   const MERITKA = [0.25, 0.33, 0.5, 0.67, 0.75, 1, 1.25, 1.5, 2, 2.5, 3, 4];
 
+  /** Hlavní vybraný objekt (podle něj se ukazuje panel); -1 = nic. */
+  const hlavni = () => (S.oznacene.length ? S.oznacene[S.oznacene.length - 1] : -1);
+  const jeOznaceny = (i) => S.oznacene.includes(i);
+
+  /** Vybere objekt. S `pridat` (Ctrl) ho přihodí k výběru, nebo z něj vyhodí, když už v něm je. */
+  function oznac(i, pridat = false) {
+    if (i < 0) {
+      S.oznacene = [];
+    } else if (!pridat) {
+      S.oznacene = [i];
+    } else if (jeOznaceny(i)) {
+      S.oznacene = S.oznacene.filter((x) => x !== i);
+    } else {
+      S.oznacene = [...S.oznacene, i];
+    }
+    kresliVybrany();
+    stav();
+  }
+
   /** Rozměr objektu na mapě po měřítku a otočení (po čtvrtotáčce si strany vymění místo). */
   function rozmerObjektu(k, o) {
     const m = o.m || 1;
@@ -439,19 +459,22 @@ export function vytvorEditor(api) {
     const kam = pripni(bod, S.objVybrany, shift);
     zmenaObjektu();
     S.objekty.push({ j: S.objVybrany.soubor, x: kam.x, y: kam.y });
-    S.objOznaceny = S.objekty.length - 1;
+    S.oznacene = [S.objekty.length - 1];
     uloz();
-    return S.objOznaceny;
+    return S.objekty.length - 1;
   }
 
-  /** Změní vybraný objekt bez zápisu do historie (na to je zmenaObjektu) a bez překreslení panelu. */
+  /** Změní všechny vybrané objekty bez zápisu do historie a bez překreslení panelu. */
   function zmenObjekt(zmena) {
-    const o = S.objekty[S.objOznaceny];
-    if (!o) return false;
-    zmena(o);
-    if (o.m === 1) delete o.m;              // výchozí hodnoty se neukládají
-    if (!o.o) delete o.o;
-    if (!o.v) delete o.v;
+    if (!S.oznacene.length) return false;
+    for (const i of S.oznacene) {
+      const o = S.objekty[i];
+      if (!o) continue;
+      zmena(o);
+      if (o.m === 1) delete o.m;            // výchozí hodnoty se neukládají
+      if (!o.o) delete o.o;
+      if (!o.v) delete o.v;
+    }
     uloz();
     kresli();
     stav();
@@ -460,7 +483,7 @@ export function vytvorEditor(api) {
 
   /** Jedna úprava vybraného objektu i se zápisem do historie a překreslením panelu. */
   function upravVybrany(zmena) {
-    if (!S.objekty[S.objOznaceny]) return false;
+    if (!S.oznacene.length) return false;
     zmenaObjektu();
     zmenObjekt(zmena);
     kresliVybrany();
@@ -479,7 +502,7 @@ export function vytvorEditor(api) {
   }
 
   function zmenMeritko(smer) {
-    const o = S.objekty[S.objOznaceny];
+    const o = S.objekty[hlavni()];
     if (!o) return;
     const ted = o.m || 1;
     const i = MERITKA.findIndex((m) => m > ted + 1e-6);
@@ -490,11 +513,15 @@ export function vytvorEditor(api) {
   }
 
   function doPopredi() {
-    upravVybrany((o) => { o.v = Math.max(0, ...S.objekty.map((x) => x.v || 0)) + 1; });
+    const nad = Math.max(0, ...S.objekty.map((x) => x.v || 0));
+    let n = 1;
+    upravVybrany((o) => { o.v = nad + n++; });
   }
 
   function doPozadi() {
-    upravVybrany((o) => { o.v = Math.min(0, ...S.objekty.map((x) => x.v || 0)) - 1; });
+    const pod = Math.min(0, ...S.objekty.map((x) => x.v || 0));
+    let n = 1;
+    upravVybrany((o) => { o.v = pod - n++; });
   }
 
   function podlePaty() {
@@ -502,11 +529,16 @@ export function vytvorEditor(api) {
   }
 
   function duplikujVybrany() {
-    const o = S.objekty[S.objOznaceny];
-    if (!o) return;
+    if (!S.oznacene.length) return;
     zmenaObjektu();
-    S.objekty.push({ ...o, x: o.x + 16, y: o.y + 16 });
-    S.objOznaceny = S.objekty.length - 1;
+    const kopie = [];
+    for (const i of S.oznacene) {
+      const o = S.objekty[i];
+      if (!o) continue;
+      S.objekty.push({ ...o, x: o.x + 16, y: o.y + 16 });
+      kopie.push(S.objekty.length - 1);
+    }
+    S.oznacene = kopie;                     // dál se pracuje s kopiemi, jako ve Photoshopu
     uloz();
     kresli();
     kresliVybrany();
@@ -514,10 +546,10 @@ export function vytvorEditor(api) {
   }
 
   function smazOznaceny() {
-    if (S.objOznaceny < 0) return;
+    if (!S.oznacene.length) return;
     zmenaObjektu();
-    S.objekty.splice(S.objOznaceny, 1);
-    S.objOznaceny = -1;
+    for (const i of [...S.oznacene].sort((a, b) => b - a)) S.objekty.splice(i, 1);
+    S.oznacene = [];
     uloz();
     kresli();
     kresliVybrany();
@@ -654,6 +686,15 @@ export function vytvorEditor(api) {
     ctx.moveTo(0, Math.round(S.posunY) + 0.5); ctx.lineTo(platno.width, Math.round(S.posunY) + 0.5);
     ctx.stroke();
     kresliObjekty();
+    if (ramecek) {
+      const x = S.posunX + Math.min(ramecek.x0, ramecek.x1) * S.zoom;
+      const y = S.posunY + Math.min(ramecek.y0, ramecek.y1) * S.zoom;
+      ctx.strokeStyle = '#f2b84b';
+      ctx.setLineDash([3, 3]);
+      ctx.strokeRect(Math.round(x) + 0.5, Math.round(y) + 0.5,
+        Math.abs(ramecek.x1 - ramecek.x0) * S.zoom, Math.abs(ramecek.y1 - ramecek.y0) * S.zoom);
+      ctx.setLineDash([]);
+    }
     if (S.obdelnikOd) {
       const { x, y } = S.obdelnikOd;
       const k = S.obdelnikOd.ted;
@@ -697,15 +738,17 @@ export function vytvorEditor(api) {
       const dy = Math.round(S.posunY + o.y * m - vyska);
       if (dx > platno.width || dy > platno.height || dx + sirka < 0 || dy + vyska < 0) continue;
       kresliObjektDo(ctx, k, o, dx, dy, sirka, vyska);
-      if (i === S.objOznaceny) {
+      if (jeOznaceny(i)) {
         ctx.strokeStyle = '#f2b84b';
         ctx.setLineDash([4, 3]);
         ctx.strokeRect(dx + 0.5, dy + 0.5, sirka - 1, vyska - 1);
         ctx.setLineDash([]);
         // Úchyt na zvětšování: čtvereček v pravém horním rohu, tahem nahoru objekt roste.
         ctx.setLineDash([]);
-        ctx.fillStyle = '#f2b84b';
-        ctx.fillRect(dx + sirka - UCHYT / 2, dy - UCHYT / 2, UCHYT, UCHYT);
+        if (i === hlavni()) {              // úchyt na zvětšování má jen hlavní vybraný
+          ctx.fillStyle = '#f2b84b';
+          ctx.fillRect(dx + sirka - UCHYT / 2, dy - UCHYT / 2, UCHYT, UCHYT);
+        }
       }
     }
   }
@@ -889,13 +932,15 @@ export function vytvorEditor(api) {
 
   /** Co se dá s položeným objektem dělat: velikost, otočení, překlopení, kopie, poloha, smazání. */
   function kresliVybrany() {
-    const o = S.objekty[S.objOznaceny];
+    const o = S.objekty[hlavni()];
     const k = o && objPodleJmena.get(o.j);
     if (!o || !k) {
       panelVybraneho.replaceChildren(h('span', { class: 'muted small' },
-        'Nic není vybrané. Klikni na objekt na mapě a půjde zvětšit, otočit nebo posunout.'));
+        'Nic není vybrané. Klikni na objekt na mapě (nástroj ✥) a půjde zvětšit, otočit nebo posunout. '
+        + 'S Ctrl se dá přibrat další, tažením po prázdnu se objekty obtáhnou rámečkem.'));
       return;
     }
+    const vic = S.oznacene.length > 1;
     const m = o.m || 1;
     const cislo = (klic, popis) => h('label', { class: 'ed-cislo' }, popis,
       h('input', {
@@ -905,7 +950,9 @@ export function vytvorEditor(api) {
       }));
     panelVybraneho.replaceChildren(
       h('div', { class: 'ed-vybrany-hlava' }, nahledObjektu(k, 40),
-        h('span', { class: 'small' }, `${k.jmeno} · ${Math.round(k.s * m)} × ${Math.round(k.v * m)} px`)),
+        h('span', { class: 'small' }, vic
+          ? `vybráno ${S.oznacene.length} objektů · změny platí pro všechny`
+          : `${k.jmeno} · ${Math.round(k.s * m)} × ${Math.round(k.v * m)} px`)),
       h('div', { class: 'ed-otoceni-tlacitka' },
         h('button', { class: 'icon-btn', title: 'Zmenšit ([)', onclick: () => zmenMeritko(-1) }, '−'),
         h('span', { class: 'muted small ed-procenta' }, `${Math.round(m * 100)} %`),
@@ -927,8 +974,10 @@ export function vytvorEditor(api) {
             panelVybraneho.querySelector('.ed-procenta').textContent = `${e.target.value} %`;
           },
         })),
-      h('div', { class: 'ed-poloha' }, cislo('x', 'x'), cislo('y', 'y'),
-        h('span', { class: 'muted small' }, 'px od počátku')));
+      vic
+        ? h('span', { class: 'muted small' }, 'Táhnutím se posunou všechny najednou, Escape výběr zruší.')
+        : h('div', { class: 'ed-poloha' }, cislo('x', 'x'), cislo('y', 'y'),
+          h('span', { class: 'muted small' }, 'px od počátku')));
   }
 
   function kresliPaletuObjektu() {
@@ -961,7 +1010,7 @@ export function vytvorEditor(api) {
   }
 
   function otevriNabidku(e, i) {
-    S.objOznaceny = i;
+    if (!jeOznaceny(i)) oznac(i);          // na objektu mimo výběr se nabídka týká jen jeho
     kresli();
     kresliVybrany();
     stav();
@@ -971,7 +1020,8 @@ export function vytvorEditor(api) {
       onclick: () => { zavriNabidku(); co(); },
     }, h('span', { class: 'ed-nabidka-znak' }, znak), popis);
     nabidka.replaceChildren(
-      h('div', { class: 'ed-nabidka-hlava muted small' }, k?.jmeno || o.j),
+      h('div', { class: 'ed-nabidka-hlava muted small' },
+        S.oznacene.length > 1 ? `vybráno ${S.oznacene.length} objektů` : (k?.jmeno || o.j)),
       radek('⬆', 'Do popředí', doPopredi),
       radek('⬇', 'Do pozadí', doPozadi),
       radek('↕', 'Řadit podle paty', podlePaty),
@@ -997,7 +1047,7 @@ export function vytvorEditor(api) {
     listaNastroju.replaceChildren(
       ...NASTROJE.map((n) => h('button', {
         class: `icon-btn${n.id === S.nastroj ? ' on' : ''}`, title: n.nazev,
-        onclick: () => { S.nastroj = n.id; kresliListu(); },
+        onclick: () => { S.nastroj = n.id; ukazBok(n.id === 'objekt' || n.id === 'vyber' ? 'objekty' : 'dlazdice'); kresliListu(); },
       }, n.znak)),
       h('span', { class: 'ed-oddel' }),
       h('label', { class: 'ed-sila', title: 'Šířka štětce' }, 'šířka',
@@ -1056,6 +1106,7 @@ export function vytvorEditor(api) {
       `${S.nazev} · ${rozsah} · zoom ${popisZoomu(S.zoom)} · štětec ${S.sila}`
       + `${v ? ` · ${v.jmeno}${S.otoceni ? ` ${popisOtoceni(S.otoceni)}` : ''}` : ''}`
       + `${S.objekty.length ? ` · objektů ${S.objekty.length}` : ''}`
+      + `${S.oznacene.length ? ` · vybráno ${S.oznacene.length}` : ''}`
       + `${S.kurzor ? ` · kurzor ${S.kurzor.x},${S.kurzor.y}` : ''}`);
   }
 
@@ -1066,30 +1117,71 @@ export function vytvorEditor(api) {
   let mezernik = false;
   let tazenyObjekt = null;      // { i, dx, dy, nove, pohnuto } — objekt tažený po mapě
   let pravyKlik = null;         // kde se stisklo pravé tlačítko (klik × posun mapy)
+  let ramecek = null;           // rozdělaný výběrový rámeček { x0, y0, x1, y1, pridat }
 
-  /** Klik nástrojem Objekty: na objektu ho chytne, jinde položí vybraný z palety. */
+  /**
+   * Klik na mapu nástrojem ✥ nebo 🌲: na objektu ho chytne (s Ctrl ho jen přibere do výběru),
+   * na prázdnu buď položí vybraný objekt z palety (🌲), nebo začne obtahovat rámeček (✥).
+   */
   function zacniObjekt(e) {
     if (!S.objKatalog) { nactiObjekty(); return; }
     if (chytUchyt(e)) return;
     const bod = naSvet(e);
+    const ctrl = e.ctrlKey || e.metaKey;
     let i = objektNa(bod);
     let nove = false;
-    if (i < 0) {
+    if (i >= 0) {
+      if (ctrl) {                          // Ctrl + klik: přidat do výběru / vyndat z výběru
+        oznac(i, true);
+        kresli();
+        stav();
+        return;
+      }
+      if (!jeOznaceny(i)) oznac(i);        // klik mimo výběr ho nahradí, uvnitř výběru ho nechá
+    } else if (S.nastroj === 'vyber') {
+      ramecek = { x0: bod.x, y0: bod.y, x1: bod.x, y1: bod.y, pridat: ctrl };
+      if (!ctrl) oznac(-1);
+      kresli();
+      stav();
+      return;
+    } else {
       i = polozObjekt(bod, e.shiftKey);
       if (i < 0) { toast('Vyber nejdřív objekt v paletě vlevo'); return; }
       nove = true;
     }
-    S.objOznaceny = i;
-    const o = S.objekty[i];
-    tazenyObjekt = { i, dx: o.x - bod.x, dy: o.y - bod.y, nove, pohnuto: false };
+    // Táhne se celý výběr, ne jen ten, na který se kliklo.
+    const chycene = S.oznacene.map((n) => ({ i: n, dx: S.objekty[n].x - bod.x, dy: S.objekty[n].y - bod.y }));
+    tazenyObjekt = { i, chycene, nove, pohnuto: false };
     kresli();
     kresliVybrany();
     stav();
   }
 
+  /** Rámeček: po puštění vybere všechno, co do něj aspoň kouskem spadá. */
+  function dokonciRamecek() {
+    const r = ramecek;
+    ramecek = null;
+    const x0 = Math.min(r.x0, r.x1);
+    const x1 = Math.max(r.x0, r.x1);
+    const y0 = Math.min(r.y0, r.y1);
+    const y1 = Math.max(r.y0, r.y1);
+    const chycene = [];
+    for (let i = 0; i < S.objekty.length; i++) {
+      const o = S.objekty[i];
+      const k = objPodleJmena.get(o.j);
+      if (!k) continue;
+      const m = rozmerObjektu(k, o);
+      if (o.x + m.s / 2 >= x0 && o.x - m.s / 2 <= x1 && o.y >= y0 && o.y - m.v <= y1) chycene.push(i);
+    }
+    S.oznacene = r.pridat ? [...new Set([...S.oznacene, ...chycene])] : chycene;
+    kresliVybrany();
+    kresli();
+    stav();
+  }
+
   /** Žlutý čtvereček v pravém horním rohu vybraného objektu: tahem se mění velikost. */
   function chytUchyt(e) {
-    const o = S.objekty[S.objOznaceny];
+    const o = S.objekty[hlavni()];
     const k = o && objPodleJmena.get(o.j);
     if (!k) return false;
     const r = rozmerObjektu(k, o);
@@ -1098,7 +1190,7 @@ export function vytvorEditor(api) {
     const hy = kam.top + S.posunY + (o.y - r.v) * S.zoom;
     if (Math.abs(e.clientX - hx) > UCHYT || Math.abs(e.clientY - hy) > UCHYT) return false;
     zmenaObjektu();
-    tazenyObjekt = { i: S.objOznaceny, meritko: true, pohnuto: true, nove: false };
+    tazenyObjekt = { i: hlavni(), meritko: true, pohnuto: true, nove: false };
     return true;
   }
 
@@ -1119,10 +1211,16 @@ export function vytvorEditor(api) {
       tazenyObjekt.pohnuto = true;
     }
     const bod = naSvet(e);
-    const kam = pripni({ x: bod.x + tazenyObjekt.dx, y: bod.y + tazenyObjekt.dy },
-      objPodleJmena.get(o.j), e.shiftKey);
-    o.x = kam.x;
-    o.y = kam.y;
+    // Přichytává se podle toho, na který objekt se kliklo; ostatní jdou s ním o stejný kus.
+    const kam = pripni({ x: bod.x + tazenyObjekt.chycene.find((c) => c.i === tazenyObjekt.i).dx,
+      y: bod.y + tazenyObjekt.chycene.find((c) => c.i === tazenyObjekt.i).dy },
+    objPodleJmena.get(o.j), e.shiftKey);
+    const posunX = kam.x - o.x;
+    const posunY = kam.y - o.y;
+    for (const c of tazenyObjekt.chycene) {
+      const d = S.objekty[c.i];
+      if (d) { d.x += posunX; d.y += posunY; }
+    }
     kresli();
   }
 
@@ -1139,7 +1237,7 @@ export function vytvorEditor(api) {
       posouvaSe = { x: e.clientX - S.posunX, y: e.clientY - S.posunY };
       return;
     }
-    if (S.nastroj === 'objekt') return zacniObjekt(e);
+    if (S.nastroj === 'objekt' || S.nastroj === 'vyber') return zacniObjekt(e);
     const { x, y } = naMape(e);
     const mazat = S.nastroj === 'guma';
     if (S.nastroj === 'kapatko') {
@@ -1166,6 +1264,7 @@ export function vytvorEditor(api) {
 
   platno.addEventListener('pointermove', (e) => {
     S.kurzor = naMape(e);
+    if (ramecek) { const b = naSvet(e); ramecek.x1 = b.x; ramecek.y1 = b.y; return kresli(); }
     if (tazenyObjekt) return tahniObjekt(e);
     if (posouvaSe) {
       S.posunX = e.clientX - posouvaSe.x;
@@ -1186,6 +1285,7 @@ export function vytvorEditor(api) {
   }
 
   function pust(e) {
+    if (ramecek) return dokonciRamecek();
     if (tazenyObjekt) {
       tazenyObjekt = null;
       uloz();
@@ -1234,7 +1334,14 @@ export function vytvorEditor(api) {
     if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'y') { e.preventDefault(); return vrat(S.budoucnost, S.historie); }
     if (e.key.toLowerCase() === 'f') { e.preventDefault(); return celySvet(); }
     // Když je vybraný objekt na mapě, otáčí se on; jinak dlaždice, co se zrovna pokládá.
-    const naObjekt = S.objOznaceny >= 0;
+    const naObjekt = S.oznacene.length > 0;
+    if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'a' && S.objekty.length) {
+      e.preventDefault();
+      S.oznacene = S.objekty.map((_, i) => i);
+      kresliVybrany();
+      stav();
+      return kresli();
+    }
     if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'd') { e.preventDefault(); return duplikujVybrany(); }
     if (e.key.toLowerCase() === 'o') {
       e.preventDefault();
@@ -1243,7 +1350,7 @@ export function vytvorEditor(api) {
     if (e.key.toLowerCase() === 'x') { e.preventDefault(); return naObjekt ? preklopObjekt() : preklop(); }
     if (e.key === '[' || e.key === ']') { e.preventDefault(); return zmenMeritko(e.key === ']' ? 1 : -1); }
     if (e.key === 'Delete' || e.key === 'Backspace') { e.preventDefault(); return smazOznaceny(); }
-    if (e.key === 'Escape') { zavriNabidku(); S.objOznaceny = -1; kresliVybrany(); return kresli(); }
+    if (e.key === 'Escape') { zavriNabidku(); ramecek = null; oznac(-1); return kresli(); }
     const n = NASTROJE.find((x) => x.klavesa === e.key.toLowerCase());
     if (n) { S.nastroj = n.id; kresliListu(); }
   }
@@ -1310,7 +1417,7 @@ export function vytvorEditor(api) {
         S.nazev = nacteny.nazev;
         S.svet = nacteny.svet;
         S.objekty = nacteny.objekty || [];
-        S.objOznaceny = -1;
+        S.oznacene = [];
         if (S.objekty.length) nactiObjekty();
         nahledy.clear();
         S.historie.length = 0; S.budoucnost.length = 0;
@@ -1328,7 +1435,7 @@ export function vytvorEditor(api) {
     S.nazev = nazev.trim() || 'Svět';
     S.svet = new Svet();
     S.objekty = [];
-    S.objOznaceny = -1;
+    S.oznacene = [];
     nahledy.clear();
     S.historie.length = 0; S.budoucnost.length = 0;
     uloz(); nasted(); kresli(); stav();
@@ -1355,6 +1462,13 @@ export function vytvorEditor(api) {
     h('div', { class: 'ed-obsah', id: 'ed-dlazdice' }, paletaZalozky, paletaMrizka, popisVybrane, otoceniRada),
     h('div', { class: 'ed-obsah', id: 'ed-objekty', hidden: true }, panelObjektu));
 
+  /** Přepne bok na záložku, aniž by se na ni muselo klikat (volá se z lišty nástrojů). */
+  function ukazBok(co) {
+    const tlacitka = [...paleta.querySelectorAll('.ed-hlavni-zalozky button')];
+    const chci = co === 'objekty' ? tlacitka[1] : tlacitka[0];
+    if (chci && !chci.classList.contains('on')) prepniBok(chci, co);
+  }
+
   function prepniBok(tlacitko, co) {
     for (const b of paleta.querySelectorAll('.ed-hlavni-zalozky button')) b.classList.toggle('on', b === tlacitko);
     paleta.querySelector('#ed-dlazdice').hidden = co !== 'dlazdice';
@@ -1362,8 +1476,8 @@ export function vytvorEditor(api) {
     // Záložka rovnou přepne nástroj, ať se nestane, že člověk kreslí dlaždice místo objektů.
     if (co === 'objekty') {
       nactiObjekty();
-      S.nastroj = 'objekt';
-    } else if (S.nastroj === 'objekt') {
+      if (S.nastroj !== 'vyber') S.nastroj = 'objekt';
+    } else if (S.nastroj === 'objekt' || S.nastroj === 'vyber') {
       S.nastroj = 'stetec';
     }
     kresliListu();
