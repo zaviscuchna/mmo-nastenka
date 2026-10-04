@@ -53,6 +53,7 @@ function popisOtoceni(o) {
 const NAZVY_TYPU = {
   trava: 'Tráva', zem: 'Zem a cesty', kamen: 'Kámen', voda: 'Voda a bažina',
   les: 'Les', pole: 'Pole', ruiny: 'Ruiny', spaleniste: 'Spáleniště', prechody: 'Přechody',
+  dlazba: 'Dlažba města', ulice: 'Ulice a bláto',
 };
 
 const NASTROJE = [
