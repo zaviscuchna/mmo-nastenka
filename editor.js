@@ -11,8 +11,10 @@
 // z náhledů kusů, ne po dlaždicích — po dlaždicích by to bylo přes milion kreslení na překreslení.
 //
 // Objekty (stromy, domy, cesty, ploty) jsou druhá vrstva: nesedí na mřížce, leží v ní, kam je
-// člověk přetáhne. Katalog i obrázek jsou zase v herním repu (board/editor/objekty.png + .json,
-// vyrábí tools/objekty-editoru.py) a stahují se, až jsou potřeba — mají pár megabajtů.
+// člověk přetáhne. Katalog je v herním repu (board/editor/objekty.json, vyrábí
+// tools/objekty-editoru.py) a obrázky vedle něj v board/editor/objekty/ rozdělené po typech.
+// Stahuje se jen katalog a z obrázků ty listy, na které je vidět: otevřená záložka palety a to,
+// co má načtený svět položené. Jeden list se vším měl přes deset megabajtů a čekalo se na něj.
 //
 // Formát projektu (stahuje se i nahrává):
 //   { verze:2, nazev, dlazdice:32, kus:32, kusy: { "cx,cy": [hodnota, kolikrát, …] }, objekty:[] }
@@ -29,7 +31,6 @@
 const ULOZISTE = 'mmo-nastenka-editor';
 const ATLAS_PNG = 'board/editor/dlazdice.png';
 const ATLAS_JSON = 'board/editor/dlazdice.json';
-const ATLAS_OBJ_PNG = 'board/editor/objekty.png';
 const ATLAS_OBJ_JSON = 'board/editor/objekty.json';
 // Krok je zhruba jedenapůlnásobek, ať se dá doladit. Nad 1× jen celé násobky, aby se pixelová
 // grafika zvětšovala celým číslem; pod 1× se zmenšuje, tam vadí jen to, aby dlaždice navazovaly.
@@ -196,8 +197,8 @@ export function vytvorEditor(api) {
   const S = {
     atlas: null,          // ImageBitmap
     barvy: null,          // průměrná barva každé dlaždice (pro náhledy kusů)
-    objAtlas: null,       // ImageBitmap atlasu objektů
-    objKatalog: null,     // { sirka, vyska, nazvyTypu, polozky }
+    objListy: new Map(),  // číslo listu → ImageBitmap (stahuje se po kouskách)
+    objKatalog: null,     // { sirka, listy, nazvyTypu, polozky }
     objTyp: null,         // otevřená záložka v paletě objektů
     objVybrany: null,     // položka katalogu, která se pokládá
     objekty: [],          // položené objekty [{ j, x, y }], x a y je pata ve světových pixelech
@@ -747,7 +748,7 @@ export function vytvorEditor(api) {
 
   /** Objekty leží nad dlaždicemi. Měřítko je S.zoom: objekt je v herních pixelech jako dlaždice. */
   function kresliObjekty() {
-    if (!S.objAtlas || !S.objekty.length) return;
+    if (!S.objKatalog || !S.objekty.length) return;
     const m = S.zoom;
     for (const i of poradiObjektu()) {
       const o = S.objekty[i];
@@ -777,15 +778,17 @@ export function vytvorEditor(api) {
 
   /** Nakreslí objekt do daného plátna i s otočením a překlopením (měřítko je v šířce a výšce). */
   function kresliObjektDo(g, k, o, dx, dy, sirka, vyska) {
+    const list = S.objListy.get(k.l);
+    if (!list) { zajistiList(k.l); return; }    // list se stahuje, překreslí se po něm
     const t = o.o || 0;
-    if (!t) { g.drawImage(S.objAtlas, k.x, k.y, k.s, k.v, dx, dy, sirka, vyska); return; }
+    if (!t) { g.drawImage(list, k.x, k.y, k.s, k.v, dx, dy, sirka, vyska); return; }
     g.save();
     g.translate(dx + sirka / 2, dy + vyska / 2);
     if (t >= 4) g.scale(-1, 1);
     g.rotate((t % 4) * Math.PI / 2);
     const w = t % 2 ? vyska : sirka;
     const v = t % 2 ? sirka : vyska;
-    g.drawImage(S.objAtlas, k.x, k.y, k.s, k.v, -w / 2, -v / 2, w, v);
+    g.drawImage(list, k.x, k.y, k.s, k.v, -w / 2, -v / 2, w, v);
     g.restore();
   }
 
@@ -1047,10 +1050,12 @@ export function vytvorEditor(api) {
     const c = h('canvas', { width: velikost, height: velikost, class: 'ed-nahled ed-nahled-obj' });
     const g = c.getContext('2d');
     g.imageSmoothingEnabled = false;
+    const list = S.objListy.get(k.l);
+    if (!list) { zajistiList(k.l); return c; }  // prázdné políčko, paleta se po stažení překreslí
     const m = Math.min(velikost / k.s, velikost / k.v);
     const sirka = Math.max(1, Math.round(k.s * m));
     const vyska = Math.max(1, Math.round(k.v * m));
-    g.drawImage(S.objAtlas, k.x, k.y, k.s, k.v, Math.round((velikost - sirka) / 2), velikost - vyska, sirka, vyska);
+    g.drawImage(list, k.x, k.y, k.s, k.v, Math.round((velikost - sirka) / 2), velikost - vyska, sirka, vyska);
     return c;
   }
 
@@ -1071,7 +1076,8 @@ export function vytvorEditor(api) {
     });
     const g = duch.getContext('2d');
     g.imageSmoothingEnabled = false;
-    g.drawImage(S.objAtlas, k.x, k.y, k.s, k.v, 0, 0, duch.width, duch.height);
+    const list = S.objListy.get(k.l);
+    if (list) g.drawImage(list, k.x, k.y, k.s, k.v, 0, 0, duch.width, duch.height);
     document.body.append(duch);
     const posun = (ev) => {
       duch.style.left = `${ev.clientX}px`;
@@ -1149,9 +1155,10 @@ export function vytvorEditor(api) {
   function kresliPaletuObjektu() {
     if (!S.objKatalog) return;
     const typy = [...new Set(S.objKatalog.polozky.map((k) => k.typ))];
-    S.objTyp ??= typy[0];
+    if (S.objTyp == null) { S.objTyp = typy[0]; zajistiListyTypu(S.objTyp); }
     objZalozky.replaceChildren(...typy.map((t) => h('button', {
-      class: t === S.objTyp ? 'on' : '', onclick: () => { S.objTyp = t; kresliPaletuObjektu(); },
+      class: t === S.objTyp ? 'on' : '',
+      onclick: () => { S.objTyp = t; zajistiListyTypu(t); kresliPaletuObjektu(); },
     }, S.objKatalog.nazvyTypu?.[t] || t)));
     objMrizka.replaceChildren(...S.objKatalog.polozky.filter((k) => k.typ === S.objTyp).map((k) => {
       const b = h('button', {
@@ -1573,6 +1580,13 @@ export function vytvorEditor(api) {
   async function stahniObrazek() {
     const m = S.svet.meze();
     if (!m) return toast('Svět je prázdný, není co vyvézt', true);
+    if (S.objekty.length) {
+      const cekani = zajistiListyProSvet();
+      if (cekani.length) {
+        toast('Stahuju obrázky objektů, než začnu vyvážet…');
+        await Promise.all(cekani).catch(() => {});
+      }
+    }
     const w = m.sirka * 32;
     const v = m.vyska * 32;
     if (w * v > 80e6) return toast(`Obrázek by měl ${w} × ${v} px, to prohlížeč neutáhne`, true);
@@ -1586,7 +1600,7 @@ export function vytvorEditor(api) {
         kresliDlazdiciDo(g, hodnota, (x - m.x0) * 32, (y - m.y0) * 32, 32);
       }
     }
-    for (const i of S.objAtlas ? poradiObjektu() : []) {
+    for (const i of S.objKatalog ? poradiObjektu() : []) {
       const o = S.objekty[i];
       const k = objPodleJmena.get(o.j);
       if (!k) continue;
@@ -1804,19 +1818,16 @@ export function vytvorEditor(api) {
     }
   }
 
-  /** Atlas objektů má pár megabajtů, tak se stahuje, až je potřeba: při otevření záložky
-   *  Objekty nebo když má načtený svět nějaké objekty položené. */
+  /** Katalog objektů (pár desítek kB) se stáhne při otevření záložky Objekty nebo když má
+   *  načtený svět nějaké objekty položené. Obrázky k němu jdou zvlášť, viz `zajistiList`. */
   async function nactiObjekty() {
-    if (S.objKatalog || S.objNacitam) return;
+    if (S.objKatalog) { zajistiListyProSvet(); return; }   // katalog už mám, jen dotáhnu obrázky
+    if (S.objNacitam) return;
     S.objNacitam = true;
     objPopis.replaceChildren('Stahuju objekty…');
     try {
-      const [blob, json] = await Promise.all([
-        repoImage(ATLAS_OBJ_PNG),
-        gh(`${REPO}/contents/${encPath(ATLAS_OBJ_JSON)}?ref=${CFG.branch}`,
-          { accept: 'application/vnd.github.raw', raw: true }).then((r) => r.json()),
-      ]);
-      S.objAtlas = await createImageBitmap(blob);
+      const json = await gh(`${REPO}/contents/${encPath(ATLAS_OBJ_JSON)}?ref=${CFG.branch}`,
+        { accept: 'application/vnd.github.raw', raw: true }).then((r) => r.json());
       S.objKatalog = json;
       objPodleJmena.clear();
       for (const k of json.polozky) objPodleJmena.set(k.soubor, k);
@@ -1824,12 +1835,54 @@ export function vytvorEditor(api) {
       kresliVybrany();
       kresli();
       stav();
+      zajistiListyProSvet();
     } catch (e) {
       objPopis.replaceChildren('Objekty se nenačetly');
       toast(`Objekty se nenačetly: ${e.message}`, true);
     } finally {
       S.objNacitam = false;
     }
+  }
+
+  const listyNacitam = new Map();       // číslo listu → běžící stahování (ať se nestahuje dvakrát)
+
+  /** Stáhne jeden list obrázků objektů (desetiny megabajtu) a překreslí, co na něm čekalo. */
+  function zajistiList(i) {
+    if (i == null || S.objListy.has(i) || listyNacitam.has(i)) return listyNacitam.get(i);
+    const popis = S.objKatalog?.listy?.[i];
+    if (!popis) return undefined;
+    const prace = repoImage(`board/editor/${popis.soubor}`)
+      .then((blob) => createImageBitmap(blob))
+      .then((bitmapa) => {
+        S.objListy.set(i, bitmapa);
+        kresliPaletuObjektu();
+        kresli();
+      })
+      .catch((e) => {
+        toast(`Obrázky objektů se nenačetly: ${e.message}`, true);
+        throw e;
+      })
+      .finally(() => listyNacitam.delete(i));
+    listyNacitam.set(i, prace);
+    return prace;
+  }
+
+  /** Listy, na kterých jsou objekty jednoho typu (záložka palety jich může mít víc). */
+  function zajistiListyTypu(typ) {
+    if (!S.objKatalog) return [];
+    const cisla = [...new Set(S.objKatalog.polozky.filter((k) => k.typ === typ).map((k) => k.l))];
+    return cisla.map((i) => zajistiList(i)).filter(Boolean);
+  }
+
+  /** Listy, které potřebuje to, co je položené na mapě. */
+  function zajistiListyProSvet() {
+    if (!S.objKatalog) return [];
+    const cisla = new Set();
+    for (const o of S.objekty) {
+      const k = objPodleJmena.get(o.j);
+      if (k) cisla.add(k.l);
+    }
+    return [...cisla].map((i) => zajistiList(i)).filter(Boolean);
   }
 
   // ---------- veřejné ----------
