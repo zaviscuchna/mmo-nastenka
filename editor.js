@@ -761,6 +761,7 @@ export function vytvorEditor(api) {
   function kresliObjekty() {
     if (!S.objKatalog || !S.objekty.length) return;
     const m = S.zoom;
+    const videt = [];
     for (const i of poradiObjektu()) {
       const o = S.objekty[i];
       const k = objPodleJmena.get(o.j);
@@ -770,8 +771,13 @@ export function vytvorEditor(api) {
       const vyska = Math.max(1, Math.round(r.v * m));
       const dx = Math.round(S.posunX + o.x * m - sirka / 2);
       const dy = Math.round(S.posunY + o.y * m - vyska);
-      if (dx > platno.width || dy > platno.height || dx + sirka < 0 || dy + vyska < 0) continue;
-      kresliStin(ctx, k, o, dx, dy, sirka, vyska);
+      // Stín sahá od objektu doprava nahoru, tak se bere i objekt kousek mimo plátno.
+      if (dx > platno.width || dy > platno.height + vyska || dx + sirka + vyska < 0 || dy + vyska < 0) continue;
+      videt.push({ i, o, k, dx, dy, sirka, vyska });
+    }
+    if (S.stiny && S.zoom >= STIN_OD) kresliStiny(ctx, platno.width, platno.height, videt);
+    for (const { i, o, k, dx, dy, sirka, vyska } of videt) {
+      if (dx > platno.width || dy > platno.height || dx + sirka < 0) continue;
       kresliObjektDo(ctx, k, o, dx, dy, sirka, vyska);
       if (jeOznaceny(i)) {
         ctx.strokeStyle = '#f2b84b';
@@ -788,11 +794,20 @@ export function vytvorEditor(api) {
     }
   }
 
-  // Stín je silueta objektu položená na zem: shora zleva svítí světlo, takže stín padá
-  // doprava dolů, je zploštělý a průsvitný. Silueta se pro každý objekt spočítá jednou
+  // Stín je silueta objektu položená na zem: světlo svítí zepředu zleva, takže stín
+  // vychází přesně z paty a padá dozadu doprava — za objekt, ne přes cestu před ním.
+  // Všechny stíny se kreslí nejdřív do jedné vrstvy a ta jde na zem naráz s jednou
+  // průhledností: překryté stíny se tak nesčítají do černých fleků a nepadají na sousední
+  // domy, protože objekty se kreslí až nad ně. Silueta se pro každý objekt spočítá jednou
   // a schová do cache, překreslovat ji po každém posunu mapy by bylo drahé.
-  const STIN_DOPRAVA = 0.5;      // jak moc stín „lehne\" doprava
-  const STIN_DELKA = 0.42;       // jak dlouhý je proti výšce objektu
+  const STIN_DOPRAVA = 1.0;      // jak moc stín „lehne\" doprava
+  const STIN_DELKA = 0.3;        // jak dlouhý je proti výšce objektu
+  const STIN_SILA = 0.36;
+  // Bez stínu: brány a mosty (průchod, stín by ležel v bráně), hradby (souvislá linie,
+  // stín by z ní dělal zubatý pruh), věci na vodě a nízký podrost, který roste při zemi.
+  const BEZ_STINU_TYPY = new Set(['cesty', 'voda', 'hradby']);
+  const BEZ_STINU = /brana|^most/;
+  let vrstvaStinu = null;
   const STIN_OD = 0.5;           // při větším oddálení se stíny nekreslí (nejsou vidět a zdržují)
   const siluety = new Map();
   let rozpocetSiluet = 0;        // kolik nových siluet se smí spočítat v tomhle snímku
@@ -825,24 +840,39 @@ export function vytvorEditor(api) {
     return c;
   }
 
-  /** Stín pod objekt: patu má tam, kde objekt stojí, a lehne si doprava dolů. */
-  function kresliStin(g, k, o, dx, dy, sirka, vyska) {
-    if (!S.stiny || k.naMrizku) return;       // kusy cest leží na zemi, ty stín nevrhají
-    if (S.zoom < STIN_OD || sirka < 10 || vyska < 10) return;
-    const sil = silueta(k);
-    if (!sil) return;
-    const t = o.o || 0;
-    const w = t % 2 ? vyska : sirka;
-    const v = t % 2 ? sirka : vyska;
-    g.save();
-    g.globalAlpha = 0.33;
-    g.setTransform(1, 0, -STIN_DOPRAVA, -STIN_DELKA, dx + sirka / 2, dy + vyska);
-    g.translate(0, 0);
-    if (t) {
-      g.rotate((t % 4) * Math.PI / 2);
-      if (t >= 4) g.scale(-1, 1);
+  function vrhaStin(k, o) {
+    if (k.naMrizku || BEZ_STINU_TYPY.has(k.typ) || BEZ_STINU.test(k.soubor)) return false;
+    // Otočené kusy (svislé ploty, zídky) jsou kresba ležící na boku, jejich silueta by lhala.
+    if ((o.o || 0) % 2) return false;
+    return !(k.typ === 'podrost' && k.v <= 40);    // kapradí, mech, květiny, vřes
+  }
+
+  /** Stíny všech objektů do jedné vrstvy, ta pak jde na `g` naráz. */
+  function kresliStiny(g, w, v, polozky) {
+    if (!vrstvaStinu) vrstvaStinu = document.createElement('canvas');
+    if (vrstvaStinu.width !== w || vrstvaStinu.height !== v) {
+      vrstvaStinu.width = w;
+      vrstvaStinu.height = v;
     }
-    g.drawImage(sil, -w / 2, -v, w, v);
+    const s = vrstvaStinu.getContext('2d');
+    s.setTransform(1, 0, 0, 1, 0, 0);
+    s.clearRect(0, 0, w, v);
+    s.imageSmoothingEnabled = false;
+    let neco = false;
+    for (const { o, k, dx, dy, sirka, vyska } of polozky) {
+      if (sirka < 10 || vyska < 10 || !vrhaStin(k, o)) continue;
+      const sil = silueta(k);
+      if (!sil) continue;
+      // Pata (spodní střed) zůstane na místě, výš položené body siluety jdou nahoru a doprava.
+      s.setTransform(1, 0, -STIN_DOPRAVA, STIN_DELKA, dx + sirka / 2, dy + vyska);
+      if ((o.o || 0) >= 4) s.scale(-1, 1);
+      s.drawImage(sil, -sirka / 2, -vyska, sirka, vyska);
+      neco = true;
+    }
+    if (!neco) return;
+    g.save();
+    g.globalAlpha = STIN_SILA;
+    g.drawImage(vrstvaStinu, 0, 0);
     g.restore();
   }
 
@@ -1674,16 +1704,22 @@ export function vytvorEditor(api) {
         kresliDlazdiciDo(g, hodnota, (x - m.x0) * 32, (y - m.y0) * 32, 32);
       }
     }
+    const polozky = [];
     for (const i of S.objKatalog ? poradiObjektu() : []) {
       const o = S.objekty[i];
       const k = objPodleJmena.get(o.j);
       if (!k) continue;
       const r = rozmerObjektu(k, o);
-      const px = Math.round(o.x - m.x0 * 32 - r.s / 2);
-      const py = Math.round(o.y - m.y0 * 32 - r.v);
-      kresliStin(g, k, o, px, py, Math.round(r.s), Math.round(r.v));
-      kresliObjektDo(g, k, o, px, py, Math.round(r.s), Math.round(r.v));
+      polozky.push({ o, k, dx: Math.round(o.x - m.x0 * 32 - r.s / 2), dy: Math.round(o.y - m.y0 * 32 - r.v),
+        sirka: Math.round(r.s), vyska: Math.round(r.v) });
     }
+    if (S.stiny) {
+      rozpocetSiluet = Infinity;               // vývoz čeká, siluety se spočítají všechny naráz
+      kresliStiny(g, w, v, polozky);
+      rozpocetSiluet = 0;
+      vrstvaStinu = null;                      // vrstva velká jako celý svět, ať nezůstane v paměti
+    }
+    for (const { o, k, dx, dy, sirka, vyska } of polozky) kresliObjektDo(g, k, o, dx, dy, sirka, vyska);
     const blob = await new Promise((hotovo) => c.toBlob(hotovo, 'image/png'));
     stahni(`${nazevSouboru()}.png`, blob);
     toast(`Vyvezeno ${m.sirka} × ${m.vyska} dlaždic, levý horní roh je ${m.x0},${m.y0}`);
