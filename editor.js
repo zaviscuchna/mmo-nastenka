@@ -783,6 +783,7 @@ export function vytvorEditor(api) {
   // a schová do cache, překreslovat ji po každém posunu mapy by bylo drahé.
   const STIN_DOPRAVA = 0.5;      // jak moc stín „lehne\" doprava
   const STIN_DELKA = 0.42;       // jak dlouhý je proti výšce objektu
+  const STIN_OD = 0.5;           // při větším oddálení se stíny nekreslí (nejsou vidět a zdržují)
   const siluety = new Map();
 
   function silueta(k) {
@@ -798,7 +799,9 @@ export function vytvorEditor(api) {
     g.globalCompositeOperation = 'source-in';
     g.fillStyle = '#000';
     g.fillRect(0, 0, k.s, k.v);
-    if (siluety.size > 400) siluety.clear();
+    // Cache musí unést celý katalog (přes šest set kusů), jinak se při pohledu na velkou
+    // mapu maže a počítá pořád dokola a editor se zasekne.
+    if (siluety.size > 1500) siluety.clear();
     siluety.set(k.soubor, c);
     return c;
   }
@@ -806,6 +809,7 @@ export function vytvorEditor(api) {
   /** Stín pod objekt: patu má tam, kde objekt stojí, a lehne si doprava dolů. */
   function kresliStin(g, k, o, dx, dy, sirka, vyska) {
     if (!S.stiny || k.naMrizku) return;       // kusy cest leží na zemi, ty stín nevrhají
+    if (S.zoom < STIN_OD || sirka < 10 || vyska < 10) return;
     const sil = silueta(k);
     if (!sil) return;
     const t = o.o || 0;
