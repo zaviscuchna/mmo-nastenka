@@ -211,6 +211,7 @@ export function vytvorEditor(api) {
     nastroj: 'stetec',
     sila: 1,              // šířka štětce v dlaždicích
     mrizka: true,
+    stiny: true,          // objekty vrhají stín na zem
     postavy: false,       // měřítko postav na mapě (zapíná se tlačítkem 🧍)
     postavyX: 0,          // levý okraj řady, světové pixely
     postavyY: 0,          // zem, na které postavy stojí, světové pixely
@@ -760,6 +761,7 @@ export function vytvorEditor(api) {
       const dx = Math.round(S.posunX + o.x * m - sirka / 2);
       const dy = Math.round(S.posunY + o.y * m - vyska);
       if (dx > platno.width || dy > platno.height || dx + sirka < 0 || dy + vyska < 0) continue;
+      kresliStin(ctx, k, o, dx, dy, sirka, vyska);
       kresliObjektDo(ctx, k, o, dx, dy, sirka, vyska);
       if (jeOznaceny(i)) {
         ctx.strokeStyle = '#f2b84b';
@@ -774,6 +776,51 @@ export function vytvorEditor(api) {
         }
       }
     }
+  }
+
+  // Stín je silueta objektu položená na zem: shora zleva svítí světlo, takže stín padá
+  // doprava dolů, je zploštělý a průsvitný. Silueta se pro každý objekt spočítá jednou
+  // a schová do cache, překreslovat ji po každém posunu mapy by bylo drahé.
+  const STIN_DOPRAVA = 0.5;      // jak moc stín „lehne\" doprava
+  const STIN_DELKA = 0.42;       // jak dlouhý je proti výšce objektu
+  const siluety = new Map();
+
+  function silueta(k) {
+    if (siluety.has(k.soubor)) return siluety.get(k.soubor);
+    const list = S.objListy.get(k.l);
+    if (!list) return null;
+    const c = document.createElement('canvas');
+    c.width = k.s;
+    c.height = k.v;
+    const g = c.getContext('2d');
+    g.imageSmoothingEnabled = false;
+    g.drawImage(list, k.x, k.y, k.s, k.v, 0, 0, k.s, k.v);
+    g.globalCompositeOperation = 'source-in';
+    g.fillStyle = '#000';
+    g.fillRect(0, 0, k.s, k.v);
+    if (siluety.size > 400) siluety.clear();
+    siluety.set(k.soubor, c);
+    return c;
+  }
+
+  /** Stín pod objekt: patu má tam, kde objekt stojí, a lehne si doprava dolů. */
+  function kresliStin(g, k, o, dx, dy, sirka, vyska) {
+    if (!S.stiny || k.naMrizku) return;       // kusy cest leží na zemi, ty stín nevrhají
+    const sil = silueta(k);
+    if (!sil) return;
+    const t = o.o || 0;
+    const w = t % 2 ? vyska : sirka;
+    const v = t % 2 ? sirka : vyska;
+    g.save();
+    g.globalAlpha = 0.33;
+    g.setTransform(1, 0, -STIN_DOPRAVA, -STIN_DELKA, dx + sirka / 2, dy + vyska);
+    g.translate(0, 0);
+    if (t) {
+      g.rotate((t % 4) * Math.PI / 2);
+      if (t >= 4) g.scale(-1, 1);
+    }
+    g.drawImage(sil, -w / 2, -v, w, v);
+    g.restore();
   }
 
   /** Nakreslí objekt do daného plátna i s otočením a překlopením (měřítko je v šířce a výšce). */
@@ -1238,6 +1285,10 @@ export function vytvorEditor(api) {
         onclick: () => { S.mrizka = !S.mrizka; kresliListu(); kresli(); },
       }, '#'),
       h('button', {
+        class: `icon-btn${S.stiny ? ' on' : ''}`, title: 'Stíny objektů',
+        onclick: () => { S.stiny = !S.stiny; kresliListu(); kresli(); },
+      }, '🌑'),
+      h('button', {
         class: `icon-btn${S.postavy ? ' on' : ''}`,
         title: 'Měřítko postav (P) — postaví na mapu hráče a nepřátele ve skutečné velikosti. Dá se přetáhnout, dalším klikem zmizí.',
         onclick: prepniMeritko,
@@ -1605,8 +1656,10 @@ export function vytvorEditor(api) {
       const k = objPodleJmena.get(o.j);
       if (!k) continue;
       const r = rozmerObjektu(k, o);
-      kresliObjektDo(g, k, o, Math.round(o.x - m.x0 * 32 - r.s / 2), Math.round(o.y - m.y0 * 32 - r.v),
-        Math.round(r.s), Math.round(r.v));
+      const px = Math.round(o.x - m.x0 * 32 - r.s / 2);
+      const py = Math.round(o.y - m.y0 * 32 - r.v);
+      kresliStin(g, k, o, px, py, Math.round(r.s), Math.round(r.v));
+      kresliObjektDo(g, k, o, px, py, Math.round(r.s), Math.round(r.v));
     }
     const blob = await new Promise((hotovo) => c.toBlob(hotovo, 'image/png'));
     stahni(`${nazevSouboru()}.png`, blob);
