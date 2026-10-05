@@ -346,6 +346,39 @@ input:focus, select:focus, textarea:focus { outline: 2px solid var(--accent); ou
 .ed-platno-obal { flex: 1; min-width: 0; position: relative; overflow: hidden; }
 .ed-platno { display: block; image-rendering: pixelated; touch-action: none; cursor: crosshair; }
 .ed-stav { padding: 6px 20px; border-top: 1px solid var(--line); background: var(--panel); }
+/* Patra */
+.ed-patra { display: flex; gap: 4px; align-items: center; }
+.ed-patra select { padding: 5px 6px; max-width: 140px; }
+.ed-patra .icon-btn { font-size: 15px; width: 28px; height: 32px; }
+.ed-patra .icon-btn.on { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); }
+.ed-patra .icon-btn:disabled { opacity: .35; cursor: default; }
+/* Malé okno editoru (místo prompt/confirm) */
+.ed-okno-pozadi { position: fixed; inset: 0; z-index: 90; background: rgba(10,8,14,.55); display: grid; place-items: center; padding: 16px; }
+.ed-okno { width: min(420px, 100%); background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 16px 18px; box-shadow: 0 12px 40px rgba(0,0,0,.6); display: flex; flex-direction: column; gap: 10px; }
+.ed-okno h3 { margin: 0; font-size: 17px; }
+.ed-okno p { margin: 0; }
+.ed-okno-pole { display: flex; flex-direction: column; gap: 10px; }
+.ed-okno-pole label, label.ed-okno-pole { display: flex; flex-direction: column; gap: 4px; font-size: 13px; color: var(--muted); }
+.ed-okno-pole input, .ed-okno-pole select { color: var(--text); }
+.ed-okno-tlacitka { display: flex; gap: 8px; justify-content: flex-end; margin-top: 4px; }
+/* Paleta objektů: hledání, čipy, naposledy použité, velké náhledy */
+.ed-hledat { width: 100%; box-sizing: border-box; margin-bottom: 8px; padding: 6px 10px; }
+.ed-cipy button { display: inline-flex; align-items: center; gap: 5px; }
+.ed-pocet { font-size: 10px; opacity: .75; background: rgba(255,255,255,.08); border-radius: 999px; padding: 0 5px; }
+.ed-cipy button.on .ed-pocet { background: rgba(0,0,0,.15); }
+.ed-nedavne { margin-bottom: 8px; padding-bottom: 8px; border-bottom: 1px solid var(--line); }
+.ed-nedavne .ed-sada { margin-top: 0; }
+.ed-nedavne .ed-nahled-obj { width: 40px; height: 40px; }
+.ed-velikosti { display: flex; gap: 4px; align-items: center; justify-content: flex-end; margin: -2px 0 6px; }
+.ed-velikosti button { background: none; border: 1px solid var(--line); color: var(--muted); border-radius: 4px; padding: 0 6px; font-size: 11px; line-height: 18px; }
+.ed-velikosti button.on { color: var(--accent-ink); background: var(--accent); border-color: var(--accent); }
+.ed-paleta-obj { display: grid; grid-template-columns: repeat(auto-fill, minmax(calc(var(--vel, 72px) + 8px), 1fr)); gap: 4px; }
+.ed-paleta-obj .ed-obj { display: flex; flex-direction: column; align-items: center; gap: 3px; padding: 3px; background: var(--panel-2); line-height: 1.2; min-width: 0; }
+.ed-paleta-obj .ed-obj:hover { border-color: var(--line); }
+.ed-paleta-obj .ed-obj.on { border-color: var(--accent); }
+.ed-paleta-obj .ed-nahled-obj { width: var(--vel, 72px); height: var(--vel, 72px); }
+.ed-paleta-obj > p { grid-column: 1 / -1; margin: 4px 0; }
+.ed-obj-jmeno { font-size: 11px; color: var(--muted); max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 @media (max-width: 720px) {
   .ed-telo { flex-direction: column; }
   .ed-bok { width: auto; max-height: 40%; border-right: 0; border-bottom: 1px solid var(--line); }
