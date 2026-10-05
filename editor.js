@@ -661,6 +661,8 @@ export function vytvorEditor(api) {
 
   function kresli() {
     if (!platno.width) return;
+    rozpocetSiluet = 24;
+    siluetyChybi = false;
     const d = 32 * S.zoom;
     ctx.imageSmoothingEnabled = false;
     ctx.fillStyle = '#14121a';
@@ -709,6 +711,7 @@ export function vytvorEditor(api) {
     ctx.moveTo(0, Math.round(S.posunY) + 0.5); ctx.lineTo(platno.width, Math.round(S.posunY) + 0.5);
     ctx.stroke();
     kresliObjekty();
+    dokresliStiny();
     if (ramecek) {
       const x = S.posunX + Math.min(ramecek.x0, ramecek.x1) * S.zoom;
       const y = S.posunY + Math.min(ramecek.y0, ramecek.y1) * S.zoom;
@@ -745,6 +748,13 @@ export function vytvorEditor(api) {
         ctx.drawImage(n, px, py, Math.round(S.posunX + (cx + 1) * dk) - px, vyska);
       }
     }
+  }
+
+  /** Doskáče zbylé siluety stínů v dalších snímcích, ať se první vykreslení nezadrhne. */
+  function dokresliStiny() {
+    if (!siluetyChybi) return;
+    siluetyChybi = false;
+    requestAnimationFrame(() => kresli());
   }
 
   /** Objekty leží nad dlaždicemi. Měřítko je S.zoom: objekt je v herních pixelech jako dlaždice. */
@@ -785,11 +795,20 @@ export function vytvorEditor(api) {
   const STIN_DELKA = 0.42;       // jak dlouhý je proti výšce objektu
   const STIN_OD = 0.5;           // při větším oddálení se stíny nekreslí (nejsou vidět a zdržují)
   const siluety = new Map();
+  let rozpocetSiluet = 0;        // kolik nových siluet se smí spočítat v tomhle snímku
+  let siluetyChybi = false;
 
   function silueta(k) {
     if (siluety.has(k.soubor)) return siluety.get(k.soubor);
     const list = S.objListy.get(k.l);
     if (!list) return null;
+    // Spočítat naráz siluety všech kusů ve městě by zablokovalo prohlížeč na pár vteřin,
+    // tak se jich v každém snímku udělá jen pár a zbytek doskáče v dalších.
+    if (rozpocetSiluet <= 0) {
+      siluetyChybi = true;
+      return null;
+    }
+    rozpocetSiluet--;
     const c = document.createElement('canvas');
     c.width = k.s;
     c.height = k.v;
