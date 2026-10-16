@@ -1377,7 +1377,19 @@ async function login(token) {
   $('#me').src = me.avatar_url;
   $('#me').title = `${nameOf(me.login)} · kliknutím odhlásit`;
   await loadItems();
+  otevriOdkaz();
 }
+
+// Přímý odkaz: …/mmo-nastenka/#grafika otevře záložku, …/#168 rovnou příspěvek nebo úkol.
+function otevriOdkaz() {
+  const cil = decodeURIComponent(location.hash.slice(1));
+  if (!cil) return;
+  const zalozka = document.querySelector(`#tabs button[data-tab="${CSS.escape(cil)}"]`);
+  if (zalozka) return zalozka.click();
+  const item = state.items.find((i) => String(i.number) === cil);
+  if (item) openDetail(item);
+}
+window.addEventListener('hashchange', () => { if (state.items.length) otevriOdkaz(); });
 
 function showLogin(msg = '') {
   $('#app').hidden = true;
