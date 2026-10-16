@@ -503,7 +503,8 @@ const grafikaUkolu = (i) => i.type === 'stavba' && i.files.length > 0;
 
 function visible() {
   return state.items.filter((i) =>
-    (grafikaUkolu(i) && state.tab === 'grafika' && !state.cat) ||
+    (grafikaUkolu(i) && (state.tab === 'grafika' || state.tab === 'vse') &&
+      (!state.cat || i.cats.includes(state.cat) || i.labels.includes(state.cat))) ||
     ((state.tab === 'vse' ? i.type !== 'stavba' : i.type === state.tab) &&
       state.states.has(i.state) &&
       (!state.cat || i.cats.includes(state.cat))));
