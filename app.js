@@ -497,11 +497,16 @@ async function saveEdit(item, ed) {
 
 // ---------- vykreslení seznamu ----------
 
+// Úkol ze Stavby s obrázky (grafika od Codexu / Clauda) patří i do záložky Grafika. Stav úkolu je jiný
+// než u návrhu (zavřený = hotovo, ne zamítnuto), proto ho filtr stavů neskrývá.
+const grafikaUkolu = (i) => i.type === 'stavba' && i.files.length > 0;
+
 function visible() {
   return state.items.filter((i) =>
-    (state.tab === 'vse' ? i.type !== 'stavba' : i.type === state.tab) &&
-    state.states.has(i.state) &&
-    (!state.cat || i.cats.includes(state.cat)));
+    (grafikaUkolu(i) && state.tab === 'grafika' && !state.cat) ||
+    ((state.tab === 'vse' ? i.type !== 'stavba' : i.type === state.tab) &&
+      state.states.has(i.state) &&
+      (!state.cat || i.cats.includes(state.cat))));
 }
 
 function imgEl(path, attrs = {}) {
@@ -552,6 +557,21 @@ function cardEl(item) {
     : item.external[0]
       ? h('div', { class: 'thumb bg-check' }, h('img', { src: item.external[0], alt: '' }))
       : h('p', { class: 'text-thumb' }, item.desc || '—');
+  if (item.type === 'stavba') {
+    const hotovo = column(item) === 'hotovo';
+    return h('button', { class: 'card', 'data-n': item.number, onclick: () => openDetail(item) },
+      thumb,
+      h('div', { class: 'body' },
+        h('div', { class: 'tags' },
+          h('span', { class: `badge ${hotovo ? 'schvaleno' : 'diskuse'}` }, hotovo ? '✅ hotovo, ve hře' : column(item) === 'dela' ? '🔨 dělá se' : 'úkol'),
+          h('span', { class: 'badge' }, `#${item.number}`),
+          item.files.length > 1 && h('span', { class: 'badge' }, `${item.files.length} obrázků`)),
+        h('h3', {}, item.title),
+        h('div', { class: 'meta' },
+          h('span', {}, `💬 ${item.comments}`),
+          h('span', { class: 'grow' }),
+          item.assignees.map((a) => h('span', { class: 'who-chip' }, avatar(a), nameOf(a))))));
+  }
   return h('button', { class: 'card', 'data-n': item.number, onclick: () => openDetail(item) },
     thumb,
     h('div', { class: 'body' },
