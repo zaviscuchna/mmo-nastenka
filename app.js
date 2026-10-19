@@ -6,6 +6,7 @@
 
 import { vytvorEditor } from './editor.js';
 import { vytvorBoj } from './boj.js';
+import { vytvorSatnik } from './satnik.js';
 
 const CFG = {
   owner: 'zaviscuchna',
@@ -643,16 +644,29 @@ function dejBoj() {
   return boj;
 }
 
+let satnik = null;
+/** Šatník (satnik.js): postavy v libovolné výbavě, listy se stahují až při prvním otevření. */
+function dejSatnik() {
+  if (!satnik) {
+    satnik = vytvorSatnik({ h, gh, repoImage, toast, encPath, CFG });
+    $('#app').append(satnik.el);
+  }
+  return satnik;
+}
+
 function render() {
   const stavba = state.tab === 'stavba';
   const jeEditor = state.tab === 'editor';
   const jeBoj = state.tab === 'boj';
-  $('.filters').hidden = stavba || jeEditor || jeBoj;
-  $('#grid').hidden = stavba || jeEditor || jeBoj;
+  const jeSatnik = state.tab === 'satnik';
+  $('.filters').hidden = stavba || jeEditor || jeBoj || jeSatnik;
+  $('#grid').hidden = stavba || jeEditor || jeBoj || jeSatnik;
   $('#board').hidden = !stavba;
-  $('#empty').hidden = jeEditor || jeBoj || $('#empty').hidden;
+  $('#empty').hidden = jeEditor || jeBoj || jeSatnik || $('#empty').hidden;
   $('#cat-filter').hidden = !(state.tab === 'vse' || CATS[state.tab]);
   if (boj && !jeBoj) boj.skryj();
+  if (satnik && !jeSatnik) satnik.skryj();
+  if (jeSatnik) { $('#empty').hidden = true; return dejSatnik().ukaz(); }
   if (jeEditor) { $('#empty').hidden = true; return dejEditor().ukaz(); }
   if (editor) editor.skryj();
   if (jeBoj) { $('#empty').hidden = true; return dejBoj().ukaz(); }
@@ -1350,7 +1364,7 @@ function setupUi() {
   }
   $('#cat-filter').onchange = (e) => { state.cat = e.target.value; render(); };
   fillCatSelect($('#cat-filter'), 'vse', true);
-  $('#new-item').onclick = () => openCompose(['vse', 'editor', 'boj'].includes(state.tab) ? 'napad' : state.tab);
+  $('#new-item').onclick = () => openCompose(['vse', 'editor', 'boj', 'satnik'].includes(state.tab) ? 'napad' : state.tab);
   $('#navod').onclick = () => openNavod(NAVOD);
   $('#prompty-zbrani').onclick = () => openNavod(PROMPTY_ZBRANI);
   $('#navod-dlg').addEventListener('click', (e) => { if (e.target === e.currentTarget) e.currentTarget.close(); });
