@@ -564,3 +564,36 @@ input:focus, select:focus, textarea:focus { outline: 2px solid var(--accent); ou
   .satnik-telo { grid-template-columns: minmax(0, 1fr); }
   .satnik-scena .satnik-platno { width: 128px !important; height: 128px !important; }
 }
+
+/* Verze hry: 2D (naše hra) × 3D (Temný svět) */
+.verze { display: flex; border: 1px solid var(--line); border-radius: var(--radius); overflow: hidden; }
+.verze button {
+  background: none; border: none; padding: 6px 12px; color: var(--muted);
+  font-family: var(--pixel); font-size: 15px;
+}
+.verze button + button { border-left: 1px solid var(--line); }
+.verze button.on { background: var(--accent); color: var(--accent-ink); }
+body.verze-3d .verze button.on { background: #7a3cff; color: #fff; }
+body.verze-3d .brand { color: #b394ff; }
+
+/* Přehled 3D verze */
+.prehled3d { padding: 20px; display: flex; flex-direction: column; gap: 28px; max-width: 1200px; margin: 0 auto; }
+.p3-hlava { display: flex; flex-direction: column; gap: 10px; }
+.p3-hlava h1 { margin: 0; font-family: var(--pixel); color: #b394ff; }
+.p3-hlava p { margin: 0; max-width: 75ch; }
+.p3-hlava pre { background: var(--panel-2); padding: 10px 12px; border-radius: var(--radius); overflow-x: auto; }
+.p3-cisla { display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 10px; }
+.p3-cislo { background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius); padding: 10px 12px; display: flex; flex-direction: column; gap: 2px; }
+.p3-cislo b { font-family: var(--pixel); font-size: 26px; color: var(--accent); }
+.p3-sekce { display: flex; flex-direction: column; gap: 10px; }
+.p3-sekce h2 { margin: 0; font-family: var(--pixel); }
+.p3-sekce > p { margin: 0; }
+.p3-modely { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 12px; }
+.p3-modely h3 { margin: 0 0 4px; font-size: 15px; }
+.p3-modely ul { margin: 0; padding-left: 18px; }
+.p3-mrizka { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 12px; }
+.p3-mrizka figure { margin: 0; display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.p3-mrizka img { width: 100%; aspect-ratio: 1280 / 760; object-fit: cover; image-rendering: pixelated; border-radius: var(--radius); background: var(--panel-2); }
+.p3-tabulka { overflow-x: auto; }
+.p3-tabulka table { border-collapse: collapse; min-width: 480px; font-variant-numeric: tabular-nums; }
+.p3-tabulka th, .p3-tabulka td { text-align: left; padding: 6px 12px; border-bottom: 1px solid var(--line); }

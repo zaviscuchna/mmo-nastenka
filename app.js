@@ -33,6 +33,10 @@ const CATS = {
 const ART_DIR = { postava: 'postavy', 'prostředí': 'prostredi', 'předmět': 'predmety', ui: 'ui', moodboard: 'moodboard' };
 const META_RE = /<!--\s*nastenka\s+(\{[\s\S]*?\})\s*-->/;
 const TOKEN_KEY = 'mmo-nastenka-token';
+// Verze hry: 2D (naše hra) a 3D (Temný svět). Příspěvky a úkoly 3D verze mají štítek `3d`, ostatní patří 2D.
+const VERZE_LABEL = '3d';
+const VERZE_KEY = 'mmo-nastenka-verze';
+const PREHLED_3D = 'board/temny-svet/prehled.json';
 
 const $ = (s) => document.querySelector(s);
 const state = {
@@ -43,7 +47,9 @@ const state = {
   tab: 'vse',
   states: new Set(['novy', 'diskuse']),
   cat: '',
+  verze: load(VERZE_KEY) === '3d' ? '3d' : '2d',
 };
+const veVerzi = (i) => (state.verze === '3d') === i.labels.includes(VERZE_LABEL);
 
 // ---------- drobnosti ----------
 
@@ -460,7 +466,7 @@ async function createItem({ type, title, desc, cat, files, options }) {
     const dir = `board/navrhy/${d}-${slug(title)}-${Math.random().toString(36).slice(2, 6)}`;
     meta.files = await uploadImages(files, dir);
   }
-  const labels = [TYPES[type], (type === 'napad' || type === 'grafika') && cat].filter(Boolean);
+  const labels = [TYPES[type], (type === 'napad' || type === 'grafika') && cat, state.verze === '3d' && VERZE_LABEL].filter(Boolean);
   return gh(`${REPO}/issues`, { method: 'POST', body: { title, body: buildBody(desc, meta), labels } });
 }
 
@@ -503,12 +509,12 @@ async function saveEdit(item, ed) {
 const grafikaUkolu = (i) => i.type === 'stavba' && i.files.length > 0;
 
 function visible() {
-  return state.items.filter((i) =>
+  return state.items.filter((i) => veVerzi(i) && (
     (grafikaUkolu(i) && (state.tab === 'grafika' || state.tab === 'vse') &&
       (!state.cat || i.cats.includes(state.cat) || i.labels.includes(state.cat))) ||
     ((state.tab === 'vse' ? i.type !== 'stavba' : i.type === state.tab) &&
       state.states.has(i.state) &&
-      (!state.cat || i.cats.includes(state.cat))));
+      (!state.cat || i.cats.includes(state.cat)))));
 }
 
 function imgEl(path, attrs = {}) {
@@ -609,7 +615,7 @@ function taskEl(item) {
 }
 
 function renderBoard() {
-  const tasks = state.items.filter((i) => i.type === 'stavba');
+  const tasks = state.items.filter((i) => i.type === 'stavba' && veVerzi(i));
   const cols = [
     ['rada', 'Na řadě', 'Zatím nic. Schválené nápady rozdělí Claude na úkoly.'],
     ['dela', 'Dělá se', 'Nikdo na ničem nedělá.'],
@@ -654,7 +660,72 @@ function dejSatnik() {
   return satnik;
 }
 
+let prehled = null;
+/** Přehled 3D verze: co už v Temném světě je (snímky, modely, výkon). Data z board/temny-svet/prehled.json. */
+async function dejPrehled() {
+  const el = $('#prehled3d');
+  if (prehled) return;
+  prehled = true;
+  el.replaceChildren(h('p', { class: 'muted' }, 'Načítám přehled 3D verze…'));
+  let d;
+  try {
+    d = JSON.parse(await (await repoImage(PREHLED_3D)).text());
+  } catch (e) {
+    prehled = null;
+    return el.replaceChildren(h('p', { class: 'err' }, `Přehled se nenačetl: ${e.message}`));
+  }
+  const obrazek = (o) => h('figure', {}, imgEl(o.soubor, { loading: 'lazy' }), h('figcaption', { class: 'muted small' }, o.popis));
+  const druhy = { postava: 'Hratelné postavy', mob: 'Mobové', boss: 'Bossové' };
+  el.replaceChildren(
+    h('section', { class: 'p3-hlava' },
+      h('h1', {}, d.nazev),
+      h('p', {}, d.popis),
+      h('div', { class: 'p3-cisla' }, d.cisla.map((c) => h('div', { class: 'p3-cislo' }, h('b', {}, c.hodnota), h('span', { class: 'muted small' }, c.popis)))),
+      h('p', { class: 'small' }, h('b', {}, 'Ovládání: '), d.ovladani),
+      h('details', {}, h('summary', {}, `Jak to spustit (větev ${d.vetev})`), h('pre', {}, d.spusteni))),
+    h('section', { class: 'p3-sekce' },
+      h('h2', {}, 'Co už je ve 3D'),
+      h('div', { class: 'p3-modely' }, Object.entries(druhy).map(([k, nazev]) => {
+        const list = d.modely.filter((m) => m.druh === k);
+        return h('div', {}, h('h3', {}, `${nazev} `, h('span', { class: 'muted' }, String(list.length))),
+          h('ul', {}, list.map((m) => h('li', {}, m.nazev, h('span', { class: 'muted small' }, ` · ${m.autor}`)))));
+      }))),
+    ...d.sekce.map((s) => h('section', { class: 'p3-sekce' },
+      h('h2', {}, s.nazev), h('p', { class: 'muted' }, s.popis),
+      h('div', { class: 'p3-mrizka' }, s.obrazky.map(obrazek)))),
+    d.vykon && h('section', { class: 'p3-sekce' },
+      h('h2', {}, 'Výkon po optimalizaci'),
+      h('div', { class: 'p3-tabulka' }, h('table', {},
+        h('thead', {}, h('tr', {}, d.vykon.sloupce.map((c) => h('th', {}, c)))),
+        h('tbody', {}, d.vykon.radky.map((r) => h('tr', {}, r.map((c) => h('td', {}, c)))))))),
+  );
+}
+
+/** Přepne 2D / 3D: záložky jen pro jednu verzi se schovají, nové příspěvky ve 3D dostanou štítek `3d`. */
+function nastavVerzi(v) {
+  state.verze = v;
+  store(VERZE_KEY, v === '3d' ? '3d' : null);
+  document.body.classList.toggle('verze-3d', v === '3d');
+  document.querySelectorAll('#verze button').forEach((b) => b.classList.toggle('on', b.dataset.verze === v));
+  let schovana = false;
+  for (const b of document.querySelectorAll('#tabs button[data-jen]')) {
+    b.hidden = b.dataset.jen !== v;
+    if (b.hidden && b.dataset.tab === state.tab) schovana = true;
+  }
+  if (schovana) document.querySelector('#tabs button[data-tab="vse"]').click();
+  else render();
+}
+
 function render() {
+  const jePrehled = state.tab === 'prehled3d';
+  $('#prehled3d').hidden = !jePrehled;
+  if (jePrehled) {
+    for (const s of ['.filters', '#grid', '#board', '#empty']) $(s).hidden = true;
+    if (editor) editor.skryj();
+    if (boj) boj.skryj();
+    if (satnik) satnik.skryj();
+    return dejPrehled();
+  }
   const stavba = state.tab === 'stavba';
   const jeEditor = state.tab === 'editor';
   const jeBoj = state.tab === 'boj';
@@ -674,7 +745,7 @@ function render() {
   const list = visible();
   $('#grid').replaceChildren(...list.map(cardEl));
   $('#empty').hidden = list.length > 0;
-  $('#count').textContent = `${list.length} z ${state.items.length}`;
+  $('#count').textContent = `${list.length} z ${state.items.filter(veVerzi).length}`;
 }
 
 function updateCard(item) {
@@ -1345,6 +1416,7 @@ function syncChips() {
 }
 
 function setupUi() {
+  for (const b of document.querySelectorAll('#verze button')) b.onclick = () => nastavVerzi(b.dataset.verze);
   for (const b of document.querySelectorAll('#tabs button')) {
     b.onclick = () => {
       state.tab = b.dataset.tab;
@@ -1364,7 +1436,7 @@ function setupUi() {
   }
   $('#cat-filter').onchange = (e) => { state.cat = e.target.value; render(); };
   fillCatSelect($('#cat-filter'), 'vse', true);
-  $('#new-item').onclick = () => openCompose(['vse', 'editor', 'boj', 'satnik'].includes(state.tab) ? 'napad' : state.tab);
+  $('#new-item').onclick = () => openCompose(['vse', 'editor', 'boj', 'satnik', 'prehled3d'].includes(state.tab) ? 'napad' : state.tab);
   $('#navod').onclick = () => openNavod(NAVOD);
   $('#prompty-zbrani').onclick = () => openNavod(PROMPTY_ZBRANI);
   $('#navod-dlg').addEventListener('click', (e) => { if (e.target === e.currentTarget) e.currentTarget.close(); });
@@ -1399,6 +1471,9 @@ async function login(token) {
 function otevriOdkaz() {
   const cil = decodeURIComponent(location.hash.slice(1));
   if (!cil) return;
+  // …/#3d přepne na 3D verzi (a #2d zpět), …/#prehled3d rovnou otevře přehled.
+  if (cil === '3d' || cil === '2d') return nastavVerzi(cil);
+  if (cil === 'prehled3d' && state.verze !== '3d') nastavVerzi('3d');
   const zalozka = document.querySelector(`#tabs button[data-tab="${CSS.escape(cil)}"]`);
   if (zalozka) return zalozka.click();
   const item = state.items.find((i) => String(i.number) === cil);
@@ -1415,6 +1490,7 @@ function showLogin(msg = '') {
 async function main() {
   $('#token-link').href = 'https://github.com/settings/tokens/new?scopes=repo&description=' + encodeURIComponent('MMO nástěnka');
   setupUi();
+  nastavVerzi(state.verze);
   $('#login-form').addEventListener('submit', async (e) => {
     e.preventDefault();
     const btn = e.target.querySelector('button');

@@ -36,15 +36,20 @@
 <div id="app" hidden>
   <header class="top">
     <div class="brand">MMO nástěnka</div>
+    <div class="verze" id="verze" role="group" aria-label="Verze hry">
+      <button data-verze="2d" class="on" title="Naše 2D hra (Phaser), jak ji stavíme od začátku">2D hra</button>
+      <button data-verze="3d" title="3D pixel verze Temný svět (větev temny-svet-zavis)">3D Temný svět</button>
+    </div>
     <nav class="tabs" id="tabs">
       <button data-tab="vse" class="on">Vše</button>
       <button data-tab="napad">Nápady</button>
       <button data-tab="grafika">Grafika</button>
       <button data-tab="rozhodnuti">Rozhodnutí</button>
       <button data-tab="stavba">Stavba</button>
-      <button data-tab="editor">Editor map</button>
-      <button data-tab="boj">Boj a nepřátelé</button>
-      <button data-tab="satnik">Šatník</button>
+      <button data-tab="editor" data-jen="2d">Editor map</button>
+      <button data-tab="boj" data-jen="2d">Boj a nepřátelé</button>
+      <button data-tab="satnik" data-jen="2d">Šatník</button>
+      <button data-tab="prehled3d" data-jen="3d" hidden>Přehled 3D</button>
     </nav>
     <div class="top-actions">
       <button class="btn" id="navod" title="Jak vygenerovat grafiku do hry: postup, pravidla a prompty">📄 Návod na obrázky</button>
@@ -70,6 +75,7 @@
 
   <main id="grid" class="grid"></main>
   <main id="board" class="board" hidden></main>
+  <main id="prehled3d" class="prehled3d" hidden></main>
   <p id="empty" class="empty" hidden>Nic tu není. Přidej první nápad nebo návrh.</p>
 </div>
 
@@ -115,6 +121,6 @@
 
 <div id="toast" class="toast" hidden></div>
 
-<script type="module" src="app.js?v=20261019a"></script>
+<script type="module" src="app.js?v=20261020a"></script>
 </body>
 </html>

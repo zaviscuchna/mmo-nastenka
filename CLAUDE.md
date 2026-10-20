@@ -33,6 +33,9 @@ https://zaviscuchna.github.io/mmo-nastenka/ (obnovit stránku).
   - rozhodnutí: možnosti v `{"options":[...]}`, hlas = komentář `<!-- hlas {"o":N} -->`
     (jeden na člověka, změna = úprava komentáře), po uzavření `winner` + `record`
     a zápis `docs/rozhodnuti/NNN-nazev.md`
+  - verze hry: příspěvek nebo úkol 3D verze (Temný svět, větev `temny-svet-zavis`) má navíc štítek `3d`,
+    bez něj patří 2D hře. Přepínač „2D hra / 3D Temný svět“ v hlavičce filtruje podle něj, nové příspěvky
+    ve 3D režimu ho dostanou samy. Záložka Přehled 3D čte `board/temny-svet/prehled.json` (snímky ve stejné složce).
   - stavba (úkol): kdo dělá = assignee, hotovo = zavřené issue, postup = `- [x]` v těle,
     závislosti = řádek `Závisí na: #12, #13`. Tenhle formát používá i Claude v herním repu
     (viz jeho `CLAUDE.md`), takže ho neměň bez úpravy obou míst.
