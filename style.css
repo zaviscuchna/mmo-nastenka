@@ -597,3 +597,10 @@ body.verze-3d .brand { color: #b394ff; }
 .p3-tabulka { overflow-x: auto; }
 .p3-tabulka table { border-collapse: collapse; min-width: 480px; font-variant-numeric: tabular-nums; }
 .p3-tabulka th, .p3-tabulka td { text-align: left; padding: 6px 12px; border-bottom: 1px solid var(--line); }
+.p3-galerie { display: grid; grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); gap: 12px; }
+.p3-model { margin: 0; background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius); padding: 8px; display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+.p3-model.boss { border-color: #7a3cff; }
+.p3-model.postava { border-color: var(--accent); }
+.p3-dvojice { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
+.p3-dvojice img { width: 100%; aspect-ratio: 1; object-fit: contain; image-rendering: pixelated; background: #2e231a; border-radius: 4px; }
+.p3-model figcaption { font-size: 14px; }
