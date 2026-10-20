@@ -1424,7 +1424,11 @@ function syncChips() {
 }
 
 function setupUi() {
-  for (const b of document.querySelectorAll('#verze button')) b.onclick = () => nastavVerzi(b.dataset.verze);
+  // Klik na „3D Temný svět“ rovnou otevře Přehled 3D (ve Vše je jich ve 3D málo a hotové věci tam nejsou vidět).
+  for (const b of document.querySelectorAll('#verze button')) b.onclick = () => {
+    nastavVerzi(b.dataset.verze);
+    if (b.dataset.verze === '3d') document.querySelector('#tabs button[data-tab="prehled3d"]').click();
+  };
   for (const b of document.querySelectorAll('#tabs button')) {
     b.onclick = () => {
       state.tab = b.dataset.tab;
